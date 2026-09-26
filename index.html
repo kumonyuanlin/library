@@ -644,8 +644,15 @@ function renderStudents(){
 }
 
 /* ========== 抽屜 ========== */
-function openSheet(s){ sheet = s; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden"; renderSheet(); $("#sheetBody").scrollTop = 0; }
+function openSheet(s){ sheet = s; showSheetWrap(); document.body.style.overflow = "hidden"; renderSheet(); $("#sheetBody").scrollTop = 0; }
 function closeSheet(){ sheet = null; $("#sheetWrap").hidden = true; document.body.style.overflow = ""; }
+/* 手機「返回」鍵／手勢：關閉目前打開的畫面，而不是離開網站 */
+function pushUiState(){ if(!(history.state && history.state.ui)) history.pushState({ ui:1 }, ""); }
+function showSheetWrap(){ $("#sheetWrap").hidden = false; pushUiState(); }
+window.addEventListener("popstate", () => {
+  if(!$("#scanOverlay").hidden) closeScan();
+  else if(!$("#sheetWrap").hidden) closeSheet();
+});
 function setSheet(title, html){ $("#sheetTitle").textContent = title; $("#sheetBody").innerHTML = html; }
 
 function renderSheet(){
@@ -730,7 +737,7 @@ function renderStudentSheet(){
 /* ---------- 借書表單 ---------- */
 let pick = null, pickType = "student"; // pick: {id, name}
 function openBorrowForm(copyId){
-  sheet = { type:"borrow", id:copyId }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+  sheet = { type:"borrow", id:copyId }; showSheetWrap(); document.body.style.overflow = "hidden";
   pick = null; pickType = "student";
   const c = state.copies[copyId], b = state.books[c.bookId];
   setSheet("借出", `
@@ -802,7 +809,11 @@ function bookFormHtml(b, isNew){
     <label class="f"><span>閱讀等級（教材推薦圖書的字母，可留空）</span><input type="text" id="fLevel" value="${esc(b.level || "")}" placeholder="例：A～I"></label>
     <label class="f"><span>備註</span><textarea id="fNote">${esc(b.note || "")}</textarea></label>
     ${isNew ? `<label class="f"><span>這本書有幾冊</span><input type="number" id="fCount" value="1" min="1" max="50" inputmode="numeric"></label>` : ""}
-    <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>`;
+    <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>
+    <div class="row2" style="margin-top:10px">
+      <button class="btn" data-act="closeSheet">取消</button>
+      ${isNew ? `<button class="btn" data-act="cancelAndScan">取消，掃下一本</button>` : `<button class="btn" data-act="openBook" data-id="${esc(sheet.id)}">不儲存，回上一頁</button>`}
+    </div>`;
 }
 function bindCoverInput(){
   $("#coverFile").addEventListener("change", async e => {
@@ -839,7 +850,7 @@ function readBookForm(){
 }
 
 async function openNewBook(isbn){
-  sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+  sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
   const noIsbnCount = Object.values(state.books).filter(b => !b.isbn).length;
   const linkHtml = isbn && noIsbnCount ? `<div class="notice" id="linkBox"><b>這本書已經建檔了嗎？</b><br>
     書庫有 ${noIsbnCount} 本是從照片建檔、還沒有 ISBN 的書。如果這本就是其中之一，搜尋書名後點選，就會把 ISBN 補上，不會重複建檔。
@@ -876,7 +887,7 @@ async function openNewBook(isbn){
 let scanner = null, scanMode = "normal", scanBusy = false, lastCode = "", lastAt = 0, returnCount = 0;
 async function startScan(mode){
   scanMode = mode; returnCount = 0;
-  $("#scanOverlay").hidden = false;
+  $("#scanOverlay").hidden = false; pushUiState();
   $("#scanTitle").textContent = mode === "return" ? "連續還書" : "掃描";
   $("#scanHint").textContent = mode === "return" ? "逐本掃描冊號標籤，掃到就自動歸還" : "對準書背的 ISBN 條碼或冊號標籤";
   const msg = $("#scanMsg"); msg.hidden = mode !== "return"; msg.className = ""; msg.textContent = mode === "return" ? "準備好了，請掃第一本" : "";
@@ -1036,6 +1047,7 @@ const actions = {
   scanReturn: () => startScan("return"),
   closeScan: () => closeScan(),
   closeSheet: () => closeSheet(),
+  cancelAndScan: () => { closeSheet(); startScan("normal"); },
   manualBook: () => openNewBook(""),
   openBook: el => openSheet({ type:"book", id:el.dataset.id }),
   openStudent: el => openSheet({ type:"student", key:el.dataset.key }),
@@ -1084,7 +1096,7 @@ const actions = {
     toast("已儲存"); openSheet({ type:"book", id });
   },
   addStudents: () => {
-    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
     setSheet("新增學生", `
       <label class="f"><span>學生姓名（一行一位，可一次貼上多位）</span><textarea id="newStu" style="min-height:160px" placeholder="王小明\n李小華"></textarea></label>
       <p style="font-size:14px;color:var(--muted);margin:0 0 12px">已經在名單上的姓名會自動略過。新增的學生只會出現在圖書借閱，不會影響學習報告系統。</p>
@@ -1171,7 +1183,7 @@ const actions = {
   },
   printBook: el => printLabels(copiesOf(el.dataset.id).map(c => c.id)),
   openPrint: () => {
-    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
     const all = Object.keys(state.copies), pend = all.filter(id => !state.copies[id].labelPrinted);
     const cats = {};
     all.forEach(id => { const b = state.books[state.copies[id].bookId]; const c = (b && b.category) || "未分類"; cats[c] = (cats[c] || 0) + 1; });
@@ -1219,7 +1231,7 @@ const actions = {
     catch(e){ prompt("請手動複製：", txt); }
   },
   openSettings: () => {
-    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
     setSheet("設定", `
       <h2 class="sec" style="margin-top:0">借書規則</h2>
       <div class="row2">
