@@ -177,6 +177,17 @@ button.item:active{background:#F4F7F6}
   .label .l-top,.label .l-title{color:#222;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .label svg{display:block}
   .label .l-no{font-weight:700;letter-spacing:.08em}
+  .stu-page{width:210mm;height:297mm;padding:10mm 12mm;box-sizing:border-box;page-break-after:always;overflow:hidden}
+  .stu-head{display:flex;justify-content:space-between;align-items:flex-end;height:9mm;border-bottom:0.4mm solid #000;margin-bottom:2mm;font-size:10pt}
+  .stu-head b{font-size:13pt}
+  .stu-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(8,33mm);grid-auto-flow:column}
+  .stu-cell{border:0.2mm dashed #aaa;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+  .stu-cell .n{font-size:20pt;font-weight:700;line-height:1.2}
+  .stu-cell .c{font-size:11pt;letter-spacing:.12em;margin-top:0.5mm}
+  .idx-grid{column-count:4;column-gap:6mm;column-fill:auto;height:262mm}
+  .idx-row{display:flex;align-items:baseline;font-size:10.5pt;line-height:5.4mm;break-inside:avoid}
+  .idx-row .dots{flex:1;border-bottom:0.2mm dotted #888;margin:0 1.5mm;transform:translateY(-1mm)}
+  .idx-row .pg{font-weight:700}
 }
 </style>
 </head>
@@ -869,6 +880,31 @@ function readBookForm(){
   };
 }
 
+/* 書名比對：去掉標點空白後，用「兩字片段」重疊程度算相似度（0～1） */
+function normTitle(t){ return String(t || "").replace(/[\s　:：,，.。．・·!！?？()（）「」『』《》〈〉\[\]【】\-—_~～、;；'"＂]/g, "").toLowerCase(); }
+function bigrams(t){ const a = []; for(let i = 0; i < t.length - 1; i++) a.push(t.slice(i, i + 2)); return a.length ? a : [t]; }
+function titleSim(ra, rb){
+  const a = normTitle(ra), b = normTitle(rb);
+  if(!a || !b) return 0;
+  if(a === b) return 1;
+  // 集數不同（例：瘋狂樹屋13層 vs 26層）視為不同的書
+  const da = (a.match(/\d+/g) || []).join(","), db = (b.match(/\d+/g) || []).join(",");
+  const penalty = da && db && da !== db ? 0.4 : 1;
+  if(a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a))) return 0.9 * penalty;
+  // 書名分段（以冒號、括號切開）後，任一段落（4 字以上）出現在另一本書名中
+  const segs = t => String(t || "").split(/[:：()（）]/).map(normTitle).filter(x => x.length >= 4);
+  if(segs(ra).some(x => b.includes(x)) || segs(rb).some(x => a.includes(x))) return 0.85 * penalty;
+  const A = bigrams(a), B = bigrams(b), setB = {};
+  B.forEach(x => setB[x] = (setB[x] || 0) + 1);
+  let hit = 0; A.forEach(x => { if(setB[x]){ hit++; setB[x]--; } });
+  return 2 * hit / (A.length + B.length) * penalty;
+}
+function similarBooks(title, onlyNoIsbn){
+  return Object.keys(state.books)
+    .filter(id => !onlyNoIsbn || !state.books[id].isbn)
+    .map(id => ({ id, score:titleSim(title, state.books[id].title) }))
+    .filter(x => x.score >= 0.5).sort((a, b) => b.score - a.score).slice(0, 4);
+}
 async function openNewBook(isbn){
   sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
   const noIsbnCount = Object.values(state.books).filter(b => !b.isbn).length;
@@ -897,6 +933,15 @@ async function openNewBook(isbn){
     if(!$("#fYear").value) $("#fYear").value = info.year;
     if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }, true); }
     $("#lookupMsg").innerHTML = `<div class="notice">已從 ${info.source} 帶入資料，請確認後儲存。</div>`;
+    // 自動比對：書庫裡是否已有同一本書（還沒補 ISBN 的）
+    const sim = similarBooks(info.title, true);
+    if(sim.length){
+      $("#lookupMsg").innerHTML = `<div class="notice warn"><b>書庫裡可能已經有這本書了！</b><br>
+        點選相符的書，會把 ISBN 補上，不會重複建立：
+        <div class="stu-results" style="margin:8px 0 0">${sim.map(x => `<button type="button" class="stu" data-act="linkIsbn" data-id="${esc(x.id)}" data-isbn="${isbn}">${esc(state.books[x.id].title)}<small>${copiesOf(x.id).length} 冊${state.books[x.id].category ? "・" + esc(state.books[x.id].category) : ""}</small></button>`).join("")}</div>
+        <div style="margin-top:8px;font-size:13px">都不是的話，確認下方資料後按「建立書籍」。（網路查到的書名：${esc(info.title)}）</div></div>`;
+      if($("#linkBox")) $("#linkBox").hidden = true;
+    }
   } else {
     $("#lookupMsg").innerHTML = `<div class="notice warn">網路資料庫查不到這本書（台灣出版的中文書很常見），請手動輸入書名，也可以拍一張封面。</div>`;
     $("#fTitle").focus();
@@ -1043,6 +1088,13 @@ function printLabels(ids){
     return db.ref(DB_ROOT).update(up);
   });
 }
+/* 列印時暫時把網頁標題改成檔名（另存 PDF 時的預設檔名） */
+function printAs(name){
+  const old = document.title;
+  document.title = "教室圖書借閱_" + name;
+  window.print();
+  setTimeout(() => { document.title = old; }, 1000);
+}
 /* 通用條碼標籤列印：items = [{ code, text }]，版面：編號在上、條碼在中、文字在下 */
 function printCodeLabels(items, kind, markPrinted){
   const ids = items.map(x => x.code);
@@ -1075,7 +1127,7 @@ function printCodeLabels(items, kind, markPrinted){
     area.appendChild(pg);
   }
   setTimeout(() => {
-    window.print();
+    printAs(kind);
     setTimeout(() => {
       if(confirm(`這 ${ids.length} 張${kind}（${Math.ceil(ids.length / per)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印。\n只是測試或只印了部分頁數，請按「取消」。`)){
         markPrinted().then(() => toast("已標記為已列印"));
@@ -1142,6 +1194,8 @@ const actions = {
     const f = readBookForm();
     if(!f.title){ toast("請輸入書名"); $("#fTitle").focus(); return; }
     if(f.isbn && findBookByIsbn(f.isbn)){ toast("這個 ISBN 已經建檔過了"); openSheet({ type:"book", id:findBookByIsbn(f.isbn) }); return; }
+    const same = similarBooks(f.title, false).filter(x => x.score >= 0.85);
+    if(same.length && !confirm(`書庫裡已經有很像的書：\n\n${same.map(x => "・" + state.books[x.id].title + "（" + copiesOf(x.id).length + " 冊）").join("\n")}\n\n如果是同一本書，請按「取消」，改用上方的「這本書已經建檔了嗎？」補上 ISBN；要增加冊數請到那本書的頁面按「增加冊數」。\n\n確定這是不同的書、要另外建立嗎？`)) return;
     const n = Math.min(50, Math.max(1, parseInt($("#fCount").value, 10) || 1));
     el.disabled = true;
     try{
@@ -1174,7 +1228,17 @@ const actions = {
     setSheet("學生條碼", `
       <div class="notice">每位學生一個條碼（S 開頭），可以貼在借書證、聯絡本或書包上。借書時掃學生條碼，再掃書，就能完成借書。<br>目前標籤規格：${esc(f.name)}</div>
       <button class="btn big primary" data-act="printStudents" data-scope="new" ${newOnes.length ? "" : "disabled"}>列印還沒印過的（${newOnes.length} 位）</button>
-      <button class="btn big" data-act="printStudents" data-scope="all" style="margin-top:10px">列印全部學生（${all.length} 位）</button>`);
+      <button class="btn big" data-act="printStudents" data-scope="all" style="margin-top:10px">列印全部學生（${all.length} 位）</button>
+      <h2 class="sec">條碼清單（放在老師資料夾）</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 8px">用一般 A4 白紙列印，每頁 16 位（2 欄 × 8 列），姓名放大、依順序排列；最前面附一頁「學生總表」，查姓名就知道在第幾頁。學生沒帶借書證時，老師翻資料夾直接掃。</p>
+      <label class="f"><span>排列順序</span><select id="listSort">
+        <option value="zhuyin">依姓名注音（ㄅㄆㄇ）</option>
+        <option value="stroke">依姓名筆畫</option>
+        <option value="code">依學生編號</option></select></label>
+      <button class="btn big primary" data-act="printStudentList">列印條碼清單（${all.length} 位，總表 + ${Math.ceil(all.length / 16)} 頁）</button>
+      <h2 class="sec">重新編號</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 8px">把目前名單上的全部學生，依姓名注音重新編成 ${STUDENT_PREFIX}0001～${STUDENT_PREFIX}${String(all.length).padStart(4, "0")}。<b style="color:var(--late)">已經印出的學生條碼會全部失效，要重新列印。</b>之後新加入的學生會接在最後面。</p>
+      <button class="btn danger" data-act="renumberStudents">依注音重新編號</button>`);
   },
   printStudents: async el => {
     let ids = Object.keys(state.students);
@@ -1187,6 +1251,67 @@ const actions = {
     printCodeLabels(ids.map(id => ({ code:studentCode(id), text:state.students[id].name })), "學生條碼", () => {
       const up = {}; ids.forEach(id => up["studentCodes/" + id + "/printed"] = true); return db.ref(DB_ROOT).update(up);
     });
+  },
+  renumberStudents: async () => {
+    const ids = Object.keys(state.students);
+    if(!ids.length){ toast("沒有學生"); return; }
+    if(!confirm(`把 ${ids.length} 位學生依姓名注音重新編號？\n\n舊的學生條碼會全部失效，重新編號後要重印學生條碼和條碼清單。`)) return;
+    let col; try{ col = new Intl.Collator("zh-Hant-TW-u-co-zhuyin"); }catch(e){ col = new Intl.Collator("zh-Hant"); }
+    ids.sort((a, b) => col.compare(state.students[a].name || "", state.students[b].name || ""));
+    const codes = {};
+    ids.forEach((id, i) => codes[id] = { code:STUDENT_PREFIX + String(i + 1).padStart(4, "0"), printed:false });
+    // 整個替換：已移除學生的舊編號一併清掉（之後恢復時會自動給新編號），避免編號重複
+    await db.ref(DB_ROOT).update({ studentCodes:codes, "settings/nextStudentNo":ids.length + 1 });
+    toast(`已依注音重新編號：${STUDENT_PREFIX}0001～${STUDENT_PREFIX}${String(ids.length).padStart(4, "0")}，請重新列印學生條碼`, 4500);
+    actions.openStudentPrint();
+  },
+  printStudentList: async el => {
+    if(!window.JsBarcode){ toast("條碼元件載入失敗，請檢查網路"); return; }
+    const ids = Object.keys(state.students);
+    if(!ids.length){ toast("沒有學生"); return; }
+    el.disabled = true; el.textContent = "產生條碼中…";
+    await ensureStudentCodes(ids);
+    const sort = $("#listSort").value;
+    const nm = id => state.students[id].name || "";
+    if(sort === "code") ids.sort((a, b) => studentCode(a).localeCompare(studentCode(b)));
+    else {
+      let col; try{ col = new Intl.Collator(sort === "zhuyin" ? "zh-Hant-TW-u-co-zhuyin" : "zh-Hant-TW-u-co-stroke"); }catch(e){ col = new Intl.Collator("zh-Hant"); }
+      ids.sort((a, b) => col.compare(nm(a), nm(b)));
+    }
+    closeSheet();
+    const sortName = { zhuyin:"依姓名注音", stroke:"依姓名筆畫", code:"依學生編號" }[sort];
+    const order = `排序：${sortName}（由上到下、由左至右）`;
+    const area = $("#printArea"); area.innerHTML = "";
+    const per = 16, pages = Math.ceil(ids.length / per);
+    // 學生總表：姓名 → 在第幾頁（每頁最多 4 欄 × 48 列）
+    const idxPer = 192, idxPages = Math.ceil(ids.length / idxPer);
+    for(let q = 0; q < idxPages; q++){
+      const pg = document.createElement("div"); pg.className = "stu-page";
+      pg.innerHTML = `<div class="stu-head"><div><b>教室圖書借閱_學生總表</b>　共 ${ids.length} 位</div><div>${order}${idxPages > 1 ? `　總表 ${q + 1} / ${idxPages}` : ""}</div></div>`
+        + `<div class="idx-grid">${ids.slice(q * idxPer, q * idxPer + idxPer).map((id, k) => {
+            const n = q * idxPer + k;
+            return `<div class="idx-row"><span>${esc(nm(id))}</span><span class="dots"></span><span class="pg">${Math.floor(n / per) + 1}</span></div>`;
+          }).join("")}</div>`;
+      area.appendChild(pg);
+    }
+    for(let p = 0; p < pages; p++){
+      const chunk = ids.slice(p * per, p * per + per);
+      const pg = document.createElement("div"); pg.className = "stu-page";
+      pg.innerHTML = `<div class="stu-head"><div><b>教室圖書借閱_學生條碼</b>　${order}</div><div>第 ${p + 1} / ${pages} 頁</div></div><div class="stu-grid"></div>`;
+      const grid = pg.querySelector(".stu-grid");
+      chunk.forEach(id => {
+        const cell = document.createElement("div"); cell.className = "stu-cell";
+        cell.innerHTML = `<div class="n">${esc(nm(id))}</div><svg></svg><div class="c">${esc(studentCode(id))}</div>`;
+        JsBarcode(cell.querySelector("svg"), studentCode(id), { format:"CODE128", width:2, height:50, displayValue:false, margin:0 });
+        const sv = cell.querySelector("svg");
+        sv.setAttribute("viewBox", `0 0 ${parseFloat(sv.getAttribute("width"))} ${parseFloat(sv.getAttribute("height"))}`);
+        sv.removeAttribute("width"); sv.removeAttribute("height"); sv.setAttribute("preserveAspectRatio", "none");
+        sv.style.cssText = "display:block;width:52mm;height:12mm;margin:1.2mm 0 0.5mm;flex:none";
+        grid.appendChild(cell);
+      });
+      area.appendChild(pg);
+    }
+    setTimeout(() => printAs("學生總表"), 100);
   },
   printOneStudent: async el => {
     const id = el.dataset.id; await ensureStudentCodes([id]);
