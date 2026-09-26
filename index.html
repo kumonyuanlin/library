@@ -178,6 +178,12 @@ details.notice summary{cursor:pointer;font-weight:700}
 #scanMsg.warn{background:#8F5B0E}
 
 /* 提示訊息 */
+#dlgBox{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:81;background:var(--surface);border-radius:16px;
+  padding:20px 18px 16px;width:min(88vw,420px);box-shadow:0 12px 40px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:14px}
+#dlgMsg{white-space:pre-line;font-size:16px;line-height:1.6;max-height:55vh;overflow-y:auto}
+#dlgBox .row2 .btn{padding:12px}
+#dlgBox #dlgCancel[hidden]{display:none}
+#dlgBox .row2:has(#dlgCancel[hidden]){grid-template-columns:1fr}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar) + 16px + env(safe-area-inset-bottom,0px));
   z-index:70;background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:15px;max-width:90vw;text-align:center;
   box-shadow:0 6px 20px rgba(0,0,0,.2)}
@@ -320,6 +326,14 @@ details.notice summary{cursor:pointer;font-weight:700}
 </div>
 
 <div id="toast" hidden></div>
+<div id="dlgWrap" hidden>
+  <div class="backdrop" style="z-index:80"></div>
+  <div id="dlgBox" role="dialog" aria-modal="true">
+    <div id="dlgMsg"></div>
+    <input type="text" id="dlgInput" hidden>
+    <div class="row2"><button class="btn" id="dlgCancel">取消</button><button class="btn primary" id="dlgOk">確定</button></div>
+  </div>
+</div>
 <div id="printArea"></div>
 
 <script>
@@ -349,6 +363,28 @@ const CAT_ORDER = ["幼兒繪本", "低年級", "中年級", "高年級", "教�
 const CAT_COLOR = { "幼兒繪本":"#E53935", "低年級":"#2B9BD8", "中年級":"#E8BC00", "高年級":"#1E9B4F", "教材推薦書":"#A9A9A9", "科普":"#7B6CC0", "英文書":"#D4B26A", "家長":"#7B4A2E" };
 const CAT_RENAME = { "高年級以上":"高年級", "綠標（高年級以上）":"高年級", "教材推薦圖書":"教材推薦書", "科普類":"科普", "黃標":"中年級", "藍標":"低年級" };
 function catDot(c){ return CAT_COLOR[c] ? `<span style="color:${CAT_COLOR[c]};font-size:15px;line-height:1">●</span> ` : ""; }
+
+/* ========== 網頁內建對話框（取代 confirm／prompt／alert） ==========
+   iPhone 從 LINE 等 App 開啟時，內建瀏覽器常常不會跳出原生對話框，按鈕看起來就像「按不下去」 */
+function openDlg(msg, opts){
+  return new Promise(resolve => {
+    const w = $("#dlgWrap");
+    $("#dlgMsg").textContent = msg;
+    const inp = $("#dlgInput");
+    inp.hidden = !opts.input; inp.value = opts.def || "";
+    $("#dlgCancel").hidden = !!opts.alert;
+    $("#dlgOk").textContent = opts.okText || "確定";
+    w.hidden = false;
+    if(opts.input) setTimeout(() => { inp.focus(); inp.select(); }, 50);
+    const done = v => { w.hidden = true; $("#dlgOk").onclick = $("#dlgCancel").onclick = null; inp.onkeydown = null; resolve(v); };
+    $("#dlgOk").onclick = () => done(opts.input ? inp.value : true);
+    $("#dlgCancel").onclick = () => done(opts.input ? null : false);
+    inp.onkeydown = e => { if(e.key === "Enter") done(inp.value); };
+  });
+}
+function askConfirm(msg, okText){ return openDlg(msg, { okText }); }
+function askPrompt(msg, def){ return openDlg(msg, { input:true, def }); }
+function showAlert(msg){ return openDlg(msg, { alert:true, okText:"知道了" }); }
 
 /* ========== 小工具 ========== */
 const $ = s => document.querySelector(s);
@@ -1246,8 +1282,8 @@ function printCodeLabels(items, kind, markPrinted){
   }
   setTimeout(() => {
     printAs(kind);
-    setTimeout(() => {
-      if(confirm(`這 ${ids.length} 張${kind}（${Math.ceil(ids.length / per)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印。\n只是測試或只印了部分頁數，請按「取消」。`)){
+    setTimeout(async () => {
+      if(await askConfirm(`這 ${ids.length} 張${kind}（${Math.ceil(ids.length / per)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印。\n只是測試或只印了部分頁數，請按「取消」。`)){
         markPrinted().then(() => toast("已標記為已列印"));
       }
     }, 300);
@@ -1299,7 +1335,7 @@ const actions = {
     $("#fIsbn").value = isbn;
     const exist = findBookByIsbn(isbn);
     if(exist && exist !== (sheet && sheet.id)){
-      if(confirm(`這個 ISBN 已經建檔：「${state.books[exist].title}」\n要打開那本書嗎？`)) openSheet({ type:"book", id:exist });
+      if(await askConfirm(`這個 ISBN 已經建檔：「${state.books[exist].title}」\n要打開那本書嗎？`)) openSheet({ type:"book", id:exist });
       return;
     }
     await runLookup(isbn);
@@ -1316,7 +1352,7 @@ const actions = {
   borrowForm: el => openBorrowForm(el.dataset.copy),
   return: async el => {
     const id = el.dataset.copy, c = state.copies[id], l = c && state.loans[c.loanId];
-    if(!confirm(`確認歸還 ${id}「${bookTitle(c && c.bookId)}」${l ? "（" + l.borrowerName + "）" : ""}？`)) return;
+    if(!await askConfirm(`確認歸還 ${id}「${bookTitle(c && c.bookId)}」${l ? "（" + l.borrowerName + "）" : ""}？`)) return;
     if(await returnCopy(id)) toast(id + " 已歸還");
   },
   returnAndClose: async el => { if(await returnCopy(el.dataset.copy)){ toast(el.dataset.copy + " 已歸還"); closeSheet(); } },
@@ -1335,7 +1371,7 @@ const actions = {
     if(!f.category){ toast("請選擇分類（書背貼紙的顏色）"); return; }
     if(f.isbn && findBookByIsbn(f.isbn)){ toast("這個 ISBN 已經建檔過了"); openSheet({ type:"book", id:findBookByIsbn(f.isbn) }); return; }
     const same = similarBooks(f.title, false).filter(x => x.score >= 0.85);
-    if(same.length && !confirm(`書庫裡已經有很像的書：\n\n${same.map(x => "・" + state.books[x.id].title + "（" + copiesOf(x.id).length + " 冊）").join("\n")}\n\n如果是同一本書，請按「取消」，改用上方的「這本書已經建檔了嗎？」補上 ISBN；要增加冊數請到那本書的頁面按「增加冊數」。\n\n確定這是不同的書、要另外建立嗎？`)) return;
+    if(same.length && !await askConfirm(`書庫裡已經有很像的書：\n\n${same.map(x => "・" + state.books[x.id].title + "（" + copiesOf(x.id).length + " 冊）").join("\n")}\n\n如果是同一本書，請按「取消」，改用上方的「這本書已經建檔了嗎？」補上 ISBN；要增加冊數請到那本書的頁面按「增加冊數」。\n\n確定這是不同的書、要另外建立嗎？`)) return;
     const n = Math.min(50, Math.max(1, parseInt($("#fCount").value, 10) || 1));
     el.disabled = true;
     try{
@@ -1395,7 +1431,7 @@ const actions = {
   renumberStudents: async () => {
     const ids = Object.keys(state.students);
     if(!ids.length){ toast("沒有學生"); return; }
-    if(!confirm(`把 ${ids.length} 位學生依姓名注音重新編號？\n\n舊的學生條碼會全部失效，重新編號後要重印學生條碼和條碼清單。`)) return;
+    if(!await askConfirm(`把 ${ids.length} 位學生依姓名注音重新編號？\n\n舊的學生條碼會全部失效，重新編號後要重印學生條碼和條碼清單。`)) return;
     let col; try{ col = new Intl.Collator("zh-Hant-TW-u-co-zhuyin"); }catch(e){ col = new Intl.Collator("zh-Hant"); }
     ids.sort((a, b) => col.compare(state.students[a].name || "", state.students[b].name || ""));
     const codes = {};
@@ -1483,17 +1519,17 @@ const actions = {
   },
   editStudent: async el => {
     const id = el.dataset.id, cur = state.students[id].name;
-    const n = (prompt("修改姓名：", cur) || "").trim();
+    const n = (await askPrompt("修改姓名：", cur) || "").trim();
     if(!n || n === cur) return;
     if(state.extraStudents[id]) await db.ref(DB_ROOT + "/extraStudents/" + id + "/name").set(n);
-    else { alert("這位學生來自學習報告系統，請到學習報告系統修改姓名，兩邊會自動同步。"); return; }
+    else { await showAlert("這位學生來自學習報告系統，請到學習報告系統修改姓名，兩邊會自動同步。"); return; }
     toast("已修改");
   },
   removeStudent: async el => {
     const id = el.dataset.id, s = state.students[id];
     const n = activeLoans().filter(l => l.studentId === id).length;
-    if(n){ alert(`${s.name} 還有 ${n} 本書沒還（含家長借的），全部歸還後才能移除。`); return; }
-    if(!confirm(`把 ${s.name} 從借書名單移除？\n借閱紀錄會保留，之後可以在「全部學生」最下方恢復。`)) return;
+    if(n){ await showAlert(`${s.name} 還有 ${n} 本書沒還（含家長借的），全部歸還後才能移除。`); return; }
+    if(!await askConfirm(`把 ${s.name} 從借書名單移除？\n借閱紀錄會保留，之後可以在「全部學生」最下方恢復。`)) return;
     if(state.extraStudents[id]) await db.ref(DB_ROOT + "/extraStudents/" + id).remove();
     else await db.ref(DB_ROOT + "/hiddenStudents/" + id).set(true);
     toast("已移除"); closeSheet();
@@ -1501,7 +1537,7 @@ const actions = {
   restoreStudent: async el => { await db.ref(DB_ROOT + "/hiddenStudents/" + el.dataset.id).remove(); toast("已恢復"); },
   linkIsbn: async el => {
     const id = el.dataset.id, isbn = el.dataset.isbn, b = state.books[id];
-    if(!confirm(`把 ISBN ${isbn} 補到「${b.title}」？`)) return;
+    if(!await askConfirm(`把 ISBN ${isbn} 補到「${b.title}」？`)) return;
     const up = { isbn };
     const info = sheet && sheet.lookup;
     if(info){
@@ -1516,7 +1552,7 @@ const actions = {
   pickImport: () => $("#importFile").click(),
   renameCat: async el => {
     const from = el.dataset.cat;
-    const to = (prompt(`把分類「${from}」改名為：`, from) || "").trim();
+    const to = (await askPrompt(`把分類「${from}」改名為：`, from) || "").trim();
     if(!to || to === from) return;
     const up = {};
     Object.keys(state.books).forEach(id => { if(state.books[id].category === from) up["books/" + id + "/category"] = to; });
@@ -1525,7 +1561,7 @@ const actions = {
   },
   clearCover: () => { $("#fCover").value = ""; $("#coverPreview").innerHTML = coverHtml({ title:$("#fTitle").value }); },
   addCopies: async el => {
-    const n = parseInt(prompt("要增加幾冊？", "1"), 10);
+    const n = parseInt(await askPrompt("要增加幾冊？", "1"), 10);
     if(!n || n < 1 || n > 50) return;
     const ids = await allocCopyIds(n), up = {}, now = Date.now();
     ids.forEach(id => up["copies/" + id] = { bookId:el.dataset.id, status:"in", createdAt:now, labelPrinted:false });
@@ -1535,7 +1571,7 @@ const actions = {
   removeCopy: async el => {
     const cps = copiesOf(el.dataset.id).filter(c => c.status !== "out");
     if(!cps.length){ toast("沒有在架上的冊可以移除"); return; }
-    const id = (prompt("要移除哪一冊？（遺失或損壞）\n在架的冊號：" + cps.map(c => c.id).join("、")) || "").trim().toUpperCase();
+    const id = (await askPrompt("要移除哪一冊？（遺失或損壞）\n在架的冊號：" + cps.map(c => c.id).join("、")) || "").trim().toUpperCase();
     if(!id) return;
     if(!cps.some(c => c.id === id)){ toast("冊號不對，或那一冊目前借出中"); return; }
     await db.ref(DB_ROOT + "/copies/" + id).remove();
@@ -1544,7 +1580,7 @@ const actions = {
   deleteBook: async el => {
     const id = el.dataset.id, cps = copiesOf(id);
     if(cps.some(c => c.status === "out")){ toast("還有冊借出中，全部歸還後才能刪除"); return; }
-    if(!confirm(`刪除「${bookTitle(id)}」和它的 ${cps.length} 冊？借閱歷史會保留書名。`)) return;
+    if(!await askConfirm(`刪除「${bookTitle(id)}」和它的 ${cps.length} 冊？借閱歷史會保留書名。`)) return;
     const up = {}; up["books/" + id] = null; cps.forEach(c => up["copies/" + c.id] = null);
     await db.ref(DB_ROOT).update(up);
     toast("已刪除"); closeSheet();
@@ -1585,7 +1621,7 @@ const actions = {
     closeSheet(); printLabels(ids);
   },
   resetLabels: async () => {
-    if(!confirm("把全部標籤都改回「未印」？（只影響列印紀錄，不會動到書籍和借閱資料）")) return;
+    if(!await askConfirm("把全部標籤都改回「未印」？（只影響列印紀錄，不會動到書籍和借閱資料）")) return;
     const up = {}; Object.keys(state.copies).forEach(id => up["copies/" + id + "/labelPrinted"] = false);
     await db.ref(DB_ROOT).update(up); toast("已全部改回未印");
   },
@@ -1596,7 +1632,7 @@ const actions = {
     const txt = "【逾期未還書籍】" + ymd().replace(/-/g, "/") + "\n" +
       late.map(l => `${l.borrowerName}　${bookTitle(l.bookId, l.bookTitle)}（${l.copyId}）${md(l.dueDate)} 到期，逾期 ${-daysLeft(l.dueDate)} 天`).join("\n");
     try{ await navigator.clipboard.writeText(txt); toast("已複製 " + late.length + " 筆，可貼到 LINE"); }
-    catch(e){ prompt("請手動複製：", txt); }
+    catch(e){ await askPrompt("請手動複製：", txt); }
   },
   openSettings: () => {
     sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
