@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>教室圖書借閱｜員林大同正興教室</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+:root{
+  --bg:#EDF1F0; --surface:#FFFFFF; --ink:#1E2B2F; --muted:#5C6A6D; --line:#D4DCDA;
+  --primary:#1D5C63; --primary-dark:#154449; --primary-soft:#DCEAE9;
+  --out:#8F5B0E; --out-soft:#FBEFD9;
+  --late:#B3261E; --late-soft:#FBE2DF;
+  --ok:#2E7447; --ok-soft:#E0F0E5;
+  --serif:"Noto Serif TC","Songti TC",serif;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --tabbar:64px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55;
+  -webkit-text-size-adjust:100%;padding-bottom:calc(var(--tabbar) + env(safe-area-inset-bottom,0px))}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid #6FA8AE;outline-offset:2px}
+[hidden]{display:none!important}
+
+/* 頁首 */
+header.top{position:sticky;top:0;z-index:20;background:var(--primary);color:#fff;
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:12px}
+header.top h1{margin:0;font-family:var(--serif);font-size:20px;font-weight:700;letter-spacing:.04em;flex:1}
+header.top .sub{display:block;font-family:var(--sans);font-size:12px;font-weight:400;opacity:.8;letter-spacing:0}
+.conn{width:10px;height:10px;border-radius:50%;background:#E4A33B;flex:none}
+.conn.on{background:#7FD69B}
+.icon-btn{background:transparent;border:0;color:inherit;padding:6px;border-radius:8px;display:grid;place-items:center}
+.icon-btn svg{width:24px;height:24px}
+
+main{max-width:760px;margin:0 auto;padding:16px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* 底部分頁 */
+nav.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabbar button{background:none;border:0;height:var(--tabbar);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--muted);font-size:13px;position:relative}
+nav.tabbar button svg{width:24px;height:24px}
+nav.tabbar button.active{color:var(--primary);font-weight:700}
+nav.tabbar .badge{position:absolute;top:8px;left:calc(50% + 6px);background:var(--late);color:#fff;font-size:11px;line-height:1;
+  padding:3px 6px;border-radius:10px;font-weight:700}
+
+/* 掃描主按鈕 */
+.scan-hero{width:100%;border:0;border-radius:18px;background:var(--primary);color:#fff;padding:22px 20px;
+  display:flex;align-items:center;gap:18px;text-align:left;box-shadow:0 6px 0 var(--primary-dark)}
+.scan-hero:active{transform:translateY(3px);box-shadow:0 3px 0 var(--primary-dark)}
+.scan-hero svg{width:64px;height:48px;flex:none}
+.scan-hero strong{display:block;font-size:24px;font-family:var(--serif);letter-spacing:.06em}
+.scan-hero span{font-size:14px;opacity:.85}
+.quick-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+
+.manual{display:flex;gap:8px;margin-top:14px}
+.manual input{flex:1;min-width:0}
+
+/* 統計 */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
+.stat{background:var(--surface);border-radius:12px;padding:12px;border:1px solid var(--line)}
+.stat b{display:block;font-size:26px;line-height:1.2;font-variant-numeric:tabular-nums}
+.stat small{color:var(--muted);font-size:13px}
+.stat.late b{color:var(--late)}
+
+h2.sec{font-size:15px;color:var(--muted);font-weight:700;margin:22px 0 8px}
+
+/* 表單元件 */
+input[type=text],input[type=search],input[type=number],input[type=date],textarea,select{
+  width:100%;border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px 12px;font-size:16px}
+textarea{min-height:70px;resize:vertical}
+label.f{display:block;margin-bottom:12px}
+label.f > span{display:block;font-size:14px;color:var(--muted);margin-bottom:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+.btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 14px;font-size:15px;font-weight:500;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.out{background:var(--out);border-color:var(--out);color:#fff}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.danger{color:var(--late);border-color:#E9B8B3}
+.btn.big{width:100%;padding:15px;font-size:18px;font-weight:700;border-radius:12px}
+.btn.sm{padding:6px 10px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* 清單 */
+.list{background:var(--surface);border-radius:14px;border:1px solid var(--line);overflow:hidden}
+.item{display:flex;gap:12px;align-items:center;padding:12px 14px;border-top:1px solid var(--line);width:100%;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left}
+.item:first-child{border-top:0}
+button.item:active{background:#F4F7F6}
+.item .grow{flex:1;min-width:0}
+.item .title{font-family:var(--serif);font-weight:700;font-size:16px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.item .meta{font-size:13px;color:var(--muted);margin-top:2px}
+.empty{padding:28px 16px;text-align:center;color:var(--muted);font-size:15px}
+
+.cover{width:44px;height:62px;border-radius:4px;background:var(--primary-soft);flex:none;object-fit:cover;
+  display:grid;place-items:center;color:var(--primary);font-family:var(--serif);font-size:18px;font-weight:700;overflow:hidden;
+  box-shadow:inset 3px 0 0 rgba(0,0,0,.12)}
+.cover.lg{width:96px;height:136px;font-size:34px}
+
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.tag.in{background:var(--ok-soft);color:var(--ok)}
+.tag.out{background:var(--out-soft);color:var(--out)}
+.tag.late{background:var(--late-soft);color:var(--late)}
+.copy-no{font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.03em}
+
+.chips{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font-size:14px}
+.chip.active{background:var(--ink);border-color:var(--ink);color:#fff}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.toolbar input{flex:1;min-width:160px}
+
+/* 底部抽屜 */
+.backdrop{position:fixed;inset:0;background:rgba(20,30,32,.45);z-index:40}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--bg);border-radius:18px 18px 0 0;
+  max-height:92vh;display:flex;flex-direction:column;max-width:760px;margin:0 auto;
+  animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(40px);opacity:.3}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+.sheet-head h3{margin:0;flex:1;font-size:17px}
+.sheet-body{overflow-y:auto;padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+
+.book-head{display:flex;gap:16px;margin-bottom:16px}
+.book-head h4{font-family:var(--serif);font-size:21px;line-height:1.35;margin:0 0 6px}
+.book-head .meta{color:var(--muted);font-size:14px}
+.status-card{border-radius:14px;padding:14px 16px;margin-bottom:14px}
+.status-card.in{background:var(--ok-soft)}
+.status-card.out{background:var(--out-soft)}
+.status-card.late{background:var(--late-soft)}
+.status-card b{font-size:18px}
+.notice{background:var(--primary-soft);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:14px}
+.notice.warn{background:var(--out-soft);color:#6B4309}
+
+.stu-results{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px;max-height:220px;overflow-y:auto}
+.stu{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;font-size:15px;text-align:left}
+.stu small{color:var(--muted);margin-left:4px}
+.stu.sel{background:var(--primary);color:#fff;border-color:var(--primary)}
+.stu.sel small{color:#CFE3E1}
+
+/* 掃描畫面 */
+#scanOverlay{position:fixed;inset:0;z-index:60;background:#000;color:#fff;display:flex;flex-direction:column}
+#scanOverlay .bar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px}
+#scanOverlay .bar strong{flex:1;font-size:17px}
+#reader{flex:1;width:100%;overflow:hidden}
+#reader video{object-fit:cover}
+#scanOverlay .hint{padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));text-align:center;font-size:15px;opacity:.9}
+#scanMsg{margin:0 16px;padding:12px;border-radius:10px;text-align:center;font-weight:700;font-size:17px;min-height:48px}
+#scanMsg.ok{background:var(--ok)}
+#scanMsg.warn{background:#8F5B0E}
+
+/* 提示訊息 */
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar) + 16px + env(safe-area-inset-bottom,0px));
+  z-index:70;background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:15px;max-width:90vw;text-align:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.2)}
+#setupBanner{background:var(--late-soft);color:var(--late);padding:12px 16px;font-size:14px}
+
+/* 標籤列印 */
+#printArea{display:none}
+@media print{
+  @page{size:A4;margin:0}
+  body{background:#fff;padding:0}
+  body > *:not(#printArea){display:none!important}
+  #printArea{display:block}
+  .label-sheet{width:210mm;display:grid;grid-template-columns:repeat(3,70mm);grid-auto-rows:37mm;page-break-after:always}
+  .label{padding:3mm 4mm;overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+  .label .l-top{font-size:7.5pt;color:#333;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .label svg{width:56mm;height:14mm;margin:1mm 0}
+  .label .l-no{font-size:13pt;font-weight:700;letter-spacing:.08em}
+  .label .l-title{font-size:7.5pt;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>教室圖書借閱<span class="sub">KUMON 員林大同正興教室</span></h1>
+  <span class="conn" id="conn" title="連線狀態"></span>
+  <button class="icon-btn" data-act="openSettings" aria-label="設定">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</header>
+<div id="setupBanner" hidden></div>
+
+<main>
+  <!-- 借還 -->
+  <section class="tab-panel active" id="tab-home">
+    <button class="scan-hero" data-act="scan">
+      <svg viewBox="0 0 64 48" fill="currentColor" aria-hidden="true"><rect x="2" y="4" width="3" height="40"/><rect x="8" y="4" width="2" height="40"/><rect x="13" y="4" width="5" height="40"/><rect x="21" y="4" width="2" height="40"/><rect x="26" y="4" width="3" height="40"/><rect x="32" y="4" width="6" height="40"/><rect x="41" y="4" width="2" height="40"/><rect x="46" y="4" width="4" height="40"/><rect x="53" y="4" width="2" height="40"/><rect x="58" y="4" width="4" height="40"/></svg>
+      <div><strong>掃描借還</strong><span>掃冊號標籤借書或還書，掃 ISBN 查書或新增書籍</span></div>
+    </button>
+    <div class="quick-row">
+      <button class="btn big" data-act="scanReturn">連續還書</button>
+      <button class="btn big" data-act="manualBook">手動新增書籍</button>
+    </div>
+    <form class="manual" id="manualForm">
+      <input type="text" id="manualCode" placeholder="沒有相機時：輸入冊號或 ISBN" autocomplete="off" inputmode="text">
+      <button class="btn primary" type="submit">查詢</button>
+    </form>
+
+    <div class="stats">
+      <div class="stat"><b id="stOut">0</b><small>借出中</small></div>
+      <div class="stat late"><b id="stLate">0</b><small>已逾期</small></div>
+      <div class="stat"><b id="stBooks">0</b><small id="stBooksSub">種書</small></div>
+    </div>
+
+    <h2 class="sec">最近借還紀錄</h2>
+    <div class="list" id="recentList"></div>
+  </section>
+
+  <!-- 借出中 -->
+  <section class="tab-panel" id="tab-loans">
+    <div class="chips" id="loanChips">
+      <button class="chip active" data-filter="all">全部借出中</button>
+      <button class="chip" data-filter="late">已逾期</button>
+      <button class="chip" data-filter="soon">3 天內到期</button>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="loanSearch" placeholder="搜尋學生、書名或冊號">
+      <button class="btn" data-act="copyLateList">複製逾期名單</button>
+    </div>
+    <div class="list" id="loanList"></div>
+  </section>
+
+  <!-- 書庫 -->
+  <section class="tab-panel" id="tab-books">
+    <div class="toolbar">
+      <input type="search" id="bookSearch" placeholder="搜尋書名、作者、ISBN、冊號、分類">
+    </div>
+    <div class="toolbar">
+      <button class="btn primary" data-act="scan">掃描新增</button>
+      <button class="btn" data-act="manualBook">手動新增</button>
+      <button class="btn" data-act="printPending" id="printPendingBtn">列印未印標籤</button>
+    </div>
+    <div class="list" id="bookList"></div>
+  </section>
+
+  <!-- 學生 -->
+  <section class="tab-panel" id="tab-students">
+    <div class="toolbar">
+      <input type="search" id="stuSearchTab" placeholder="搜尋學生姓名或暱稱">
+    </div>
+    <div class="chips" id="stuChips">
+      <button class="chip active" data-filter="borrowing">目前有借書</button>
+      <button class="chip" data-filter="all">全部學生</button>
+    </div>
+    <div class="list" id="studentList"></div>
+  </section>
+</main>
+
+<nav class="tabbar">
+  <button class="active" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5v14M6 5v14M10 5v14M13 5v14M17 5v14M21 5v14"/></svg>借還</button>
+  <button data-tab="loans"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>借出中<span class="badge" id="lateBadge" hidden></span></button>
+  <button data-tab="books"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h4v16H4zM10 4h4v16h-4zM16 5l3.5-1 3 15.5-3.5 1z"/></svg>書庫</button>
+  <button data-tab="students"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5"/></svg>學生</button>
+</nav>
+
+<div id="sheetWrap" hidden>
+  <div class="backdrop" data-act="closeSheet"></div>
+  <div class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h3 id="sheetTitle"></h3><button class="icon-btn" data-act="closeSheet" aria-label="關閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</div>
+
+<div id="scanOverlay" hidden>
+  <div class="bar"><strong id="scanTitle">掃描</strong><button class="btn sm" data-act="closeScan">完成</button></div>
+  <div id="reader"></div>
+  <div id="scanMsg" hidden></div>
+  <div class="hint" id="scanHint">對準書背的 ISBN 條碼或冊號標籤</div>
+</div>
+
+<div id="toast" hidden></div>
+<div id="printArea"></div>
+
+<script>
+/* =========================================================
+   設定區：請把「學習報告系統」那份 firebaseConfig 整段貼過來取代
+   ========================================================= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD5QbEYiyDBzl1LmowR0pzz_xy_RJheiWo",
+  authDomain: "kumonyuanlin-a11bd.firebaseapp.com",
+  databaseURL: "https://kumonyuanlin-a11bd-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "kumonyuanlin-a11bd",
+};
+const DB_ROOT = "library";                        // 本系統資料路徑
+const STUDENT_PATH = "learningReports/students";  // 學生名單（唯讀，沿用學習報告系統）
+const COPY_PREFIX = "B";                          // 冊號前綴，例：B0001
+const CLASSROOM_NAME = "KUMON 員林大同正興教室";
+
+/* ========== 狀態 ========== */
+let db = null;
+const state = { books:{}, copies:{}, loans:{}, settings:{ loanDays:14 }, students:{} };
+let currentTab = "home";
+let sheet = null;          // {type, id, ...}
+let loanFilter = "all", stuFilter = "borrowing";
+
+/* ========== 小工具 ========== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = n => String(n).padStart(2, "0");
+function ymd(d){ d = d || new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function addDays(n){ const d = new Date(); d.setDate(d.getDate()+n); return ymd(d); }
+function daysLeft(due){ const t = new Date(ymd()+"T00:00:00"); const d = new Date(due+"T00:00:00"); return Math.round((d - t)/86400000); }
+function md(s){ if(!s) return ""; const p = s.split("-"); return (+p[1])+"/"+(+p[2]); }
+function fmtTime(ts){ if(!ts) return ""; const d = new Date(ts); return (d.getMonth()+1)+"/"+d.getDate()+" "+pad(d.getHours())+":"+pad(d.getMinutes()); }
+function firstChar(t){ return esc((t||"書").trim().charAt(0) || "書"); }
+
+let toastTimer;
+function toast(msg, ms){
+  const t = $("#toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms || 2600);
+}
+
+/* ========== ISBN ========== */
+function isbn13Valid(s){
+  if(!/^97[89]\d{10}$/.test(s)) return false;
+  let sum = 0; for(let i=0;i<12;i++) sum += (+s[i]) * (i%2 ? 3 : 1);
+  return (10 - sum % 10) % 10 === +s[12];
+}
+function isbn10to13(s){
+  if(!/^\d{9}[\dX]$/.test(s)) return null;
+  let sum = 0; for(let i=0;i<10;i++) sum += (s[i]==="X"?10:+s[i]) * (10-i);
+  if(sum % 11) return null;
+  const b = "978" + s.slice(0,9); let t = 0;
+  for(let i=0;i<12;i++) t += (+b[i]) * (i%2 ? 3 : 1);
+  return b + ((10 - t%10) % 10);
+}
+function normalizeIsbn(raw){
+  const s = String(raw).replace(/[-\s]/g, "").toUpperCase();
+  if(isbn13Valid(s)) return s;
+  return isbn10to13(s);
+}
+
+async function lookupIsbn(isbn){
+  try{
+    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn);
+    const j = await r.json();
+    if(j.items && j.items.length){
+      const v = j.items[0].volumeInfo || {};
+      const img = v.imageLinks ? (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail || "") : "";
+      return { title:(v.title||"") + (v.subtitle ? "：" + v.subtitle : ""), author:(v.authors||[]).join("、"),
+        publisher:v.publisher||"", year:(v.publishedDate||"").slice(0,4), cover:img.replace("http://","https://"), source:"Google Books" };
+    }
+  }catch(e){ console.warn("Google Books", e); }
+  try{
+    const r = await fetch("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data");
+    const j = await r.json(); const v = j["ISBN:" + isbn];
+    if(v){
+      const y = (v.publish_date||"").match(/\d{4}/);
+      return { title:(v.title||"") + (v.subtitle ? "：" + v.subtitle : ""), author:(v.authors||[]).map(a=>a.name).join("、"),
+        publisher:(v.publishers||[]).map(p=>p.name).join("、"), year:y ? y[0] : "", cover:(v.cover && (v.cover.medium||v.cover.small)) || "", source:"Open Library" };
+    }
+  }catch(e){ console.warn("Open Library", e); }
+  return null;
+}
+
+/* ========== 資料查詢 ========== */
+function copiesOf(bookId){
+  return Object.keys(state.copies).filter(id => state.copies[id].bookId === bookId).sort().map(id => Object.assign({ id }, state.copies[id]));
+}
+function activeLoans(){
+  return Object.keys(state.loans).filter(id => !state.loans[id].returnedAt).map(id => Object.assign({ id }, state.loans[id]));
+}
+function findBookByIsbn(isbn){ return Object.keys(state.books).find(id => state.books[id].isbn === isbn) || null; }
+function studentName(id){ const s = state.students[id]; return s ? s.name : ""; }
+function loansOfBorrower(key){
+  return Object.keys(state.loans).map(id => Object.assign({ id }, state.loans[id])).filter(l => borrowerKey(l) === key);
+}
+function borrowerKey(l){ return l.studentId ? "s:" + l.studentId : "n:" + (l.borrowerName || ""); }
+function loanStatus(l){
+  if(l.returnedAt) return { cls:"in", text:"已歸還" };
+  const d = daysLeft(l.dueDate);
+  if(d < 0) return { cls:"late", text:"逾期 " + (-d) + " 天" };
+  if(d === 0) return { cls:"out", text:"今天到期" };
+  return { cls:"out", text:"剩 " + d + " 天" };
+}
+function bookTitle(bookId, fallback){ const b = state.books[bookId]; return b ? b.title : (fallback || "（書籍已刪除）"); }
+function coverHtml(book, lg){
+  const cls = "cover" + (lg ? " lg" : "");
+  if(book && book.cover) return `<img class="${cls}" src="${esc(book.cover)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
+  return `<div class="${cls}">${firstChar(book && book.title)}</div>`;
+}
+
+/* ========== Firebase ========== */
+function init(){
+  if(!window.firebase){ showSetup("Firebase 元件載入失敗，請確認網路連線後重新整理。"); return; }
+  const cfg = Object.assign({}, FIREBASE_CONFIG);
+  if(!cfg.apiKey || cfg.apiKey.indexOf("請") === 0) delete cfg.apiKey;
+  try{ firebase.initializeApp(cfg); db = firebase.database(); }
+  catch(e){ showSetup("Firebase 設定有誤：" + e.message); return; }
+
+  db.ref(".info/connected").on("value", s => $("#conn").classList.toggle("on", !!s.val()));
+  ["books","copies","loans","settings"].forEach(k => {
+    db.ref(DB_ROOT + "/" + k).on("value", snap => {
+      state[k] = snap.val() || {};
+      if(k === "settings") state.settings = Object.assign({ loanDays:14 }, state.settings);
+      scheduleRender();
+    }, err => showSetup("無法讀取圖書資料（" + err.code + "）。請到 Firebase 主控台的 Realtime Database 規則，允許讀寫 library 路徑。"));
+  });
+  db.ref(STUDENT_PATH).on("value", snap => { state.students = snap.val() || {}; scheduleRender(); },
+    err => showSetup("無法讀取學生名單（" + err.code + "）。"));
+}
+function showSetup(msg){ const b = $("#setupBanner"); b.textContent = msg; b.hidden = false; }
+
+/* 多個節點的更新會分開觸發，集中到下一個時間點再一次重畫，避免畫到一半的資料 */
+let renderTimer = null;
+function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 30); }
+
+async function allocCopyIds(n){
+  const res = await db.ref(DB_ROOT + "/settings/nextCopyNo").transaction(v => (v || 1) + n);
+  const end = res.snapshot.val(), start = end - n;
+  return Array.from({ length:n }, (_, i) => COPY_PREFIX + String(start + i).padStart(4, "0"));
+}
+
+async function borrowCopy(copyId, borrower, dueDate){
+  const snap = await db.ref(DB_ROOT + "/copies/" + copyId).once("value");
+  const c = snap.val();
+  if(!c){ toast("找不到這一冊"); return false; }
+  if(c.status === "out"){ toast(copyId + " 目前是借出狀態，請先歸還"); return false; }
+  const loanId = db.ref().push().key;
+  const up = {};
+  up["loans/" + loanId] = { copyId, bookId:c.bookId, bookTitle:bookTitle(c.bookId), studentId:borrower.id || null,
+    borrowerName:borrower.name, borrowedAt:Date.now(), dueDate, returnedAt:null };
+  up["copies/" + copyId + "/status"] = "out";
+  up["copies/" + copyId + "/loanId"] = loanId;
+  await db.ref(DB_ROOT).update(up);
+  return true;
+}
+async function returnCopy(copyId){
+  const c = state.copies[copyId]; if(!c) return false;
+  const up = {};
+  if(c.loanId) up["loans/" + c.loanId + "/returnedAt"] = Date.now();
+  up["copies/" + copyId + "/status"] = "in";
+  up["copies/" + copyId + "/loanId"] = null;
+  await db.ref(DB_ROOT).update(up);
+  return true;
+}
+
+/* ========== 畫面 ========== */
+function renderAll(){
+  renderHome(); renderLoans(); renderBooks(); renderStudents();
+  if(sheet && (sheet.type === "book" || sheet.type === "student" || sheet.type === "copy-return")) renderSheet();
+}
+
+function renderHome(){
+  const act = activeLoans();
+  const late = act.filter(l => daysLeft(l.dueDate) < 0).length;
+  $("#stOut").textContent = act.length;
+  $("#stLate").textContent = late;
+  $("#stBooks").textContent = Object.keys(state.books).length;
+  $("#stBooksSub").textContent = "種書，共 " + Object.keys(state.copies).length + " 冊";
+  const badge = $("#lateBadge"); badge.hidden = !late; badge.textContent = late;
+
+  const ev = [];
+  Object.keys(state.loans).forEach(id => {
+    const l = state.loans[id];
+    ev.push({ t:l.borrowedAt, kind:"借出", l });
+    if(l.returnedAt) ev.push({ t:l.returnedAt, kind:"歸還", l });
+  });
+  ev.sort((a, b) => b.t - a.t);
+  $("#recentList").innerHTML = ev.slice(0, 10).map(e => `
+    <button class="item" data-act="openStudent" data-key="${esc(borrowerKey(e.l))}">
+      <span class="tag ${e.kind === "借出" ? "out" : "in"}">${e.kind}</span>
+      <div class="grow"><div class="title">${esc(bookTitle(e.l.bookId, e.l.bookTitle))}</div>
+      <div class="meta">${esc(e.l.borrowerName)}　<span class="copy-no">${esc(e.l.copyId)}</span>　${fmtTime(e.t)}</div></div>
+    </button>`).join("") || `<div class="empty">還沒有借還紀錄。先到「書庫」建立書籍、貼上冊號標籤，就可以開始借書。</div>`;
+}
+
+function renderLoans(){
+  const q = $("#loanSearch").value.trim().toLowerCase();
+  let list = activeLoans();
+  if(loanFilter === "late") list = list.filter(l => daysLeft(l.dueDate) < 0);
+  if(loanFilter === "soon") list = list.filter(l => { const d = daysLeft(l.dueDate); return d >= 0 && d <= 3; });
+  if(q) list = list.filter(l => [l.borrowerName, bookTitle(l.bookId, l.bookTitle), l.copyId].join(" ").toLowerCase().includes(q));
+  list.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  $("#loanList").innerHTML = list.map(l => {
+    const st = loanStatus(l);
+    return `<div class="item">
+      <div class="grow"><div class="title">${esc(bookTitle(l.bookId, l.bookTitle))}</div>
+      <div class="meta"><b>${esc(l.borrowerName)}</b>　<span class="copy-no">${esc(l.copyId)}</span>　到期 ${md(l.dueDate)}</div></div>
+      <span class="tag ${st.cls}">${st.text}</span>
+      <button class="btn sm ok" data-act="return" data-copy="${esc(l.copyId)}">歸還</button>
+    </div>`;
+  }).join("") || `<div class="empty">${loanFilter === "late" ? "目前沒有逾期的書。" : "目前沒有借出中的書。"}</div>`;
+}
+
+function renderBooks(){
+  const q = $("#bookSearch").value.trim().toLowerCase();
+  const pending = Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted).length;
+  const pb = $("#printPendingBtn"); pb.textContent = "列印未印標籤（" + pending + "）"; pb.disabled = !pending;
+  let ids = Object.keys(state.books);
+  if(q){
+    ids = ids.filter(id => {
+      const b = state.books[id];
+      const cps = copiesOf(id).map(c => c.id).join(" ");
+      return [b.title, b.author, b.publisher, b.isbn, b.category, b.level ? "等級" + b.level : "", cps].join(" ").toLowerCase().includes(q);
+    });
+  }
+  ids.sort((a, b) => (state.books[a].title || "").localeCompare(state.books[b].title || "", "zh-Hant"));
+  $("#bookList").innerHTML = ids.map(id => {
+    const b = state.books[id], cps = copiesOf(id), inN = cps.filter(c => c.status !== "out").length;
+    return `<button class="item" data-act="openBook" data-id="${esc(id)}">
+      ${coverHtml(b)}
+      <div class="grow"><div class="title">${esc(b.title)}</div>
+      <div class="meta">${esc(b.author || "")}${b.category ? "　" + esc(b.category) : ""}${b.level ? "　等級 " + esc(b.level) : ""}</div></div>
+      <span class="tag ${inN ? "in" : "out"}">在架 ${inN}/${cps.length}</span>
+    </button>`;
+  }).join("") || `<div class="empty">${q ? "找不到符合的書。" : "書庫還是空的。按「掃描新增」掃書背的 ISBN 條碼開始建檔。"}</div>`;
+}
+
+function renderStudents(){
+  const q = $("#stuSearchTab").value.trim().toLowerCase();
+  const act = activeLoans();
+  const counts = {};
+  act.forEach(l => { const k = borrowerKey(l); counts[k] = (counts[k] || 0) + 1; });
+  let rows = [];
+  if(stuFilter === "all"){
+    rows = Object.keys(state.students).map(id => ({ key:"s:" + id, name:state.students[id].name, nick:state.students[id].nickname || "" }));
+  } else {
+    const seen = {};
+    act.forEach(l => { const k = borrowerKey(l); if(!seen[k]){ seen[k] = 1; const s = l.studentId && state.students[l.studentId];
+      rows.push({ key:k, name:l.borrowerName, nick:s ? (s.nickname || "") : "" }); } });
+  }
+  if(q) rows = rows.filter(r => (r.name + " " + r.nick).toLowerCase().includes(q));
+  rows.sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh-Hant"));
+  $("#studentList").innerHTML = rows.map(r => {
+    const n = counts[r.key] || 0;
+    const late = act.filter(l => borrowerKey(l) === r.key && daysLeft(l.dueDate) < 0).length;
+    return `<button class="item" data-act="openStudent" data-key="${esc(r.key)}">
+      <div class="grow"><div style="font-weight:700">${esc(r.name)}${r.nick ? `<small style="color:var(--muted);font-weight:400">　${esc(r.nick)}</small>` : ""}</div></div>
+      ${late ? `<span class="tag late">逾期 ${late}</span>` : ""}
+      ${n ? `<span class="tag out">借 ${n} 本</span>` : ""}
+    </button>`;
+  }).join("") || `<div class="empty">${stuFilter === "borrowing" ? "目前沒有學生借書。" : "找不到學生。學生名單沿用學習報告系統，請在那邊新增。"}</div>`;
+}
+
+/* ========== 抽屜 ========== */
+function openSheet(s){ sheet = s; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden"; renderSheet(); $("#sheetBody").scrollTop = 0; }
+function closeSheet(){ sheet = null; $("#sheetWrap").hidden = true; document.body.style.overflow = ""; }
+function setSheet(title, html){ $("#sheetTitle").textContent = title; $("#sheetBody").innerHTML = html; }
+
+function renderSheet(){
+  if(!sheet) return;
+  if(sheet.type === "book") return renderBookSheet();
+  if(sheet.type === "student") return renderStudentSheet();
+  if(sheet.type === "copy-return") return renderCopyReturnSheet();
+}
+
+function renderBookSheet(){
+  const b = state.books[sheet.id];
+  if(!b){ setSheet("書籍", `<div class="empty">這本書已被刪除。</div>`); return; }
+  const cps = copiesOf(sheet.id);
+  const rows = cps.map(c => {
+    let status = `<span class="tag in">在架</span>`, btn = `<button class="btn sm out" data-act="borrowForm" data-copy="${c.id}">借出</button>`, who = "";
+    if(c.status === "out"){
+      const l = state.loans[c.loanId] || {};
+      const st = l.dueDate ? loanStatus(l) : { cls:"out", text:"借出中" };
+      status = `<span class="tag ${st.cls}">${st.text}</span>`;
+      who = `<div class="meta">${esc(l.borrowerName || "")}${l.dueDate ? "　到期 " + md(l.dueDate) : ""}</div>`;
+      btn = `<button class="btn sm ok" data-act="return" data-copy="${c.id}">歸還</button>`;
+    }
+    return `<div class="item"><div class="grow"><span class="copy-no">${c.id}</span>${c.labelPrinted ? "" : `<small style="color:var(--out)">　標籤未印</small>`}${who}</div>${status}${btn}</div>`;
+  }).join("");
+  setSheet("書籍資料", `
+    <div class="book-head">${coverHtml(b, true)}
+      <div><h4>${esc(b.title)}</h4>
+      <div class="meta">${esc(b.author || "作者未填")}<br>${esc(b.publisher || "")}${b.year ? "　" + esc(b.year) : ""}<br>
+      ${b.isbn ? "ISBN " + esc(b.isbn) : "無 ISBN"}${b.category ? "<br>分類：" + esc(b.category) : ""}${b.level ? "　等級 " + esc(b.level) : ""}</div></div>
+    </div>
+    ${b.note ? `<div class="notice">${esc(b.note)}</div>` : ""}
+    <h2 class="sec" style="margin-top:0">各冊狀態（${cps.length} 冊）</h2>
+    <div class="list">${rows || `<div class="empty">還沒有任何一冊，請按下方「增加冊數」。</div>`}</div>
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn" data-act="addCopies" data-id="${esc(sheet.id)}">增加冊數</button>
+      <button class="btn" data-act="printBook" data-id="${esc(sheet.id)}">列印這本的標籤</button>
+      <button class="btn" data-act="editBook" data-id="${esc(sheet.id)}">編輯資料</button>
+    </div>
+    <div class="toolbar">
+      <button class="btn danger" data-act="removeCopy" data-id="${esc(sheet.id)}">移除其中一冊</button>
+      <button class="btn danger" data-act="deleteBook" data-id="${esc(sheet.id)}">刪除這本書</button>
+    </div>`);
+}
+
+function renderCopyReturnSheet(){
+  const c = state.copies[sheet.id];
+  if(!c){ setSheet("冊號", `<div class="empty">找不到這一冊。</div>`); return; }
+  if(c.status !== "out"){ openBorrowForm(sheet.id); return; }
+  const b = state.books[c.bookId], l = state.loans[c.loanId] || {};
+  const st = l.dueDate ? loanStatus(l) : { cls:"out", text:"借出中" };
+  setSheet("歸還", `
+    <div class="book-head">${coverHtml(b)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${sheet.id}</span></div></div></div>
+    <div class="status-card ${st.cls}"><b>${esc(l.borrowerName || "")}</b> 借閱中<br>
+      借出 ${fmtTime(l.borrowedAt)}，到期 ${md(l.dueDate)}（${st.text}）</div>
+    <button class="btn big ok" data-act="returnAndClose" data-copy="${sheet.id}">確認歸還</button>
+    <div class="toolbar" style="margin-top:12px"><button class="btn" data-act="openBook" data-id="${esc(c.bookId)}">看這本書的所有冊</button></div>`);
+}
+
+function renderStudentSheet(){
+  const key = sheet.key;
+  const loans = loansOfBorrower(key);
+  const sid = key.indexOf("s:") === 0 ? key.slice(2) : null;
+  const name = sid ? (studentName(sid) || (loans[0] && loans[0].borrowerName) || "") : key.slice(2);
+  const cur = loans.filter(l => !l.returnedAt).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const past = loans.filter(l => l.returnedAt).sort((a, b) => b.returnedAt - a.returnedAt);
+  setSheet(name + " 的借閱", `
+    <h2 class="sec" style="margin-top:0">目前借閱（${cur.length}）</h2>
+    <div class="list">${cur.map(l => { const st = loanStatus(l); return `<div class="item">
+      <div class="grow"><div class="title">${esc(bookTitle(l.bookId, l.bookTitle))}</div>
+      <div class="meta"><span class="copy-no">${esc(l.copyId)}</span>　借出 ${fmtTime(l.borrowedAt)}　到期 ${md(l.dueDate)}</div></div>
+      <span class="tag ${st.cls}">${st.text}</span>
+      <button class="btn sm ok" data-act="return" data-copy="${esc(l.copyId)}">歸還</button></div>`; }).join("") || `<div class="empty">目前沒有借書。</div>`}</div>
+    <h2 class="sec">借閱歷史（${past.length}）</h2>
+    <div class="list">${past.slice(0, 100).map(l => `<div class="item"><div class="grow"><div class="title">${esc(bookTitle(l.bookId, l.bookTitle))}</div>
+      <div class="meta"><span class="copy-no">${esc(l.copyId)}</span>　${fmtTime(l.borrowedAt)} 借　${fmtTime(l.returnedAt)} 還</div></div></div>`).join("") || `<div class="empty">沒有歷史紀錄。</div>`}</div>`);
+}
+
+/* ---------- 借書表單 ---------- */
+let pick = null; // {id, name}
+function openBorrowForm(copyId){
+  sheet = { type:"borrow", id:copyId }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+  pick = null;
+  const c = state.copies[copyId], b = state.books[c.bookId];
+  setSheet("借出", `
+    <div class="book-head">${coverHtml(b)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${copyId}</span>　<span class="tag in">在架</span></div></div></div>
+    <label class="f"><span>借閱學生</span><input type="search" id="pickSearch" placeholder="輸入姓名或暱稱搜尋" autocomplete="off"></label>
+    <div class="stu-results" id="pickResults"></div>
+    <label class="f"><span>到期日（預設 ${state.settings.loanDays} 天）</span><input type="date" id="pickDue" value="${addDays(+state.settings.loanDays || 14)}"></label>
+    <button class="btn big out" id="borrowBtn" data-act="doBorrow" data-copy="${copyId}" disabled>請先選擇學生</button>`);
+  renderPickResults();
+  $("#pickSearch").addEventListener("input", renderPickResults);
+}
+function renderPickResults(){
+  const q = ($("#pickSearch").value || "").trim().toLowerCase();
+  const act = activeLoans();
+  const cnt = {}; act.forEach(l => { if(l.studentId) cnt[l.studentId] = (cnt[l.studentId] || 0) + 1; });
+  let ids = Object.keys(state.students);
+  if(q) ids = ids.filter(id => ((state.students[id].name || "") + " " + (state.students[id].nickname || "")).toLowerCase().includes(q));
+  ids.sort((a, b) => (state.students[a].name || "").localeCompare(state.students[b].name || "", "zh-Hant"));
+  let html = ids.slice(0, 40).map(id => {
+    const s = state.students[id];
+    return `<button type="button" class="stu ${pick && pick.id === id ? "sel" : ""}" data-act="pickStu" data-id="${esc(id)}">${esc(s.name)}${cnt[id] ? `<small>已借${cnt[id]}</small>` : ""}</button>`;
+  }).join("");
+  if(!q && ids.length > 40) html += `<div class="meta" style="width:100%;color:var(--muted);font-size:13px">共 ${ids.length} 位，請輸入姓名縮小範圍</div>`;
+  if(q && !ids.length) html = `<button type="button" class="stu ${pick && !pick.id ? "sel" : ""}" data-act="pickOther">名單外借閱人：「${esc(q)}」</button>`;
+  if(!Object.keys(state.students).length) html = `<div class="notice warn" style="width:100%">讀不到學生名單，可直接輸入姓名，再點「名單外借閱人」。</div>` + (q ? html : "");
+  $("#pickResults").innerHTML = html;
+  const btn = $("#borrowBtn");
+  btn.disabled = !pick;
+  btn.textContent = pick ? "借給 " + pick.name : "請先選擇學生";
+}
+
+/* ---------- 書籍表單（新增／編輯） ---------- */
+function bookFormHtml(b, isNew){
+  const cats = [...new Set(Object.values(state.books).map(x => x.category).filter(Boolean))];
+  return `
+    <div id="lookupMsg"></div>
+    <div class="book-head" style="align-items:flex-end">
+      <div id="coverPreview">${coverHtml(b, true)}</div>
+      <div><label class="btn" for="coverFile">拍封面／選照片</label>
+      <input type="file" id="coverFile" accept="image/*" capture="environment" hidden>
+      ${b.cover ? `<button type="button" class="btn sm" data-act="clearCover" style="margin-top:8px">移除封面</button>` : ""}</div>
+    </div>
+    <input type="hidden" id="fCover" value="${esc(b.cover || "")}">
+    <label class="f"><span>ISBN</span><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" ${isNew && b.isbn ? "readonly" : ""} inputmode="numeric" placeholder="沒有可留空"></label>
+    <label class="f"><span>書名（必填）</span><input type="text" id="fTitle" value="${esc(b.title || "")}"></label>
+    <label class="f"><span>作者</span><input type="text" id="fAuthor" value="${esc(b.author || "")}"></label>
+    <div class="row2">
+      <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
+      <label class="f"><span>出版年</span><input type="text" id="fYear" value="${esc(b.year || "")}" inputmode="numeric"></label>
+    </div>
+    <label class="f"><span>分類</span><input type="text" id="fCat" value="${esc(b.category || "")}" list="catList" placeholder="例：繪本、橋梁書、英文讀本">
+      <datalist id="catList">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
+    <label class="f"><span>閱讀等級（教材推薦圖書的字母，可留空）</span><input type="text" id="fLevel" value="${esc(b.level || "")}" placeholder="例：A～I"></label>
+    <label class="f"><span>備註</span><textarea id="fNote">${esc(b.note || "")}</textarea></label>
+    ${isNew ? `<label class="f"><span>這本書有幾冊</span><input type="number" id="fCount" value="1" min="1" max="50" inputmode="numeric"></label>` : ""}
+    <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>`;
+}
+function bindCoverInput(){
+  $("#coverFile").addEventListener("change", async e => {
+    const f = e.target.files[0]; if(!f) return;
+    try{
+      const url = await compressImage(f, 320);
+      $("#fCover").value = url;
+      $("#coverPreview").innerHTML = `<img class="cover lg" src="${url}" alt="">`;
+    }catch(err){ toast("照片讀取失敗"); }
+  });
+}
+function compressImage(file, maxW){
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, maxW / img.width);
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(img.src);
+      res(cv.toDataURL("image/jpeg", 0.75));
+    };
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function readBookForm(){
+  return {
+    isbn: normalizeIsbn($("#fIsbn").value) || $("#fIsbn").value.replace(/[-\s]/g, ""),
+    title: $("#fTitle").value.trim(), author: $("#fAuthor").value.trim(),
+    publisher: $("#fPub").value.trim(), year: $("#fYear").value.trim(),
+    category: $("#fCat").value.trim(), level: $("#fLevel").value.trim().toUpperCase(), note: $("#fNote").value.trim(), cover: $("#fCover").value
+  };
+}
+
+async function openNewBook(isbn){
+  sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+  const noIsbnCount = Object.values(state.books).filter(b => !b.isbn).length;
+  const linkHtml = isbn && noIsbnCount ? `<div class="notice" id="linkBox"><b>這本書已經建檔了嗎？</b><br>
+    書庫有 ${noIsbnCount} 本是從照片建檔、還沒有 ISBN 的書。如果這本就是其中之一，搜尋書名後點選，就會把 ISBN 補上，不會重複建檔。
+    <input type="search" id="linkSearch" placeholder="輸入書名關鍵字" style="margin-top:8px" autocomplete="off">
+    <div class="stu-results" id="linkResults" style="margin-bottom:0"></div></div>` : "";
+  setSheet("新增書籍", linkHtml + bookFormHtml({ isbn:isbn || "" }, true));
+  bindCoverInput();
+  if($("#linkSearch")) $("#linkSearch").addEventListener("input", () => {
+    const q = $("#linkSearch").value.trim().toLowerCase();
+    if(!q){ $("#linkResults").innerHTML = ""; return; }
+    const ids = Object.keys(state.books).filter(id => !state.books[id].isbn && (state.books[id].title || "").toLowerCase().includes(q)).slice(0, 20);
+    $("#linkResults").innerHTML = ids.map(id => `<button type="button" class="stu" data-act="linkIsbn" data-id="${esc(id)}" data-isbn="${isbn}">${esc(state.books[id].title)}</button>`).join("")
+      || `<span style="font-size:14px;color:var(--muted)">找不到，請直接在下方建立新書</span>`;
+  });
+  if(!isbn){ $("#fTitle").focus(); return; }
+  $("#lookupMsg").innerHTML = `<div class="notice">正在查詢 ISBN ${isbn} 的書籍資料…</div>`;
+  const info = await lookupIsbn(isbn);
+  if(!sheet || sheet.type !== "form" || !$("#fTitle")) return;
+  sheet.lookup = info;
+  if(info){
+    if(!$("#fTitle").value) $("#fTitle").value = info.title;
+    if(!$("#fAuthor").value) $("#fAuthor").value = info.author;
+    if(!$("#fPub").value) $("#fPub").value = info.publisher;
+    if(!$("#fYear").value) $("#fYear").value = info.year;
+    if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }, true); }
+    $("#lookupMsg").innerHTML = `<div class="notice">已從 ${info.source} 帶入資料，請確認後儲存。</div>`;
+  } else {
+    $("#lookupMsg").innerHTML = `<div class="notice warn">網路資料庫查不到這本書（台灣出版的中文書很常見），請手動輸入書名，也可以拍一張封面。</div>`;
+    $("#fTitle").focus();
+  }
+}
+
+/* ========== 掃描 ========== */
+let scanner = null, scanMode = "normal", scanBusy = false, lastCode = "", lastAt = 0, returnCount = 0;
+async function startScan(mode){
+  scanMode = mode; returnCount = 0;
+  $("#scanOverlay").hidden = false;
+  $("#scanTitle").textContent = mode === "return" ? "連續還書" : "掃描";
+  $("#scanHint").textContent = mode === "return" ? "逐本掃描冊號標籤，掃到就自動歸還" : "對準書背的 ISBN 條碼或冊號標籤";
+  const msg = $("#scanMsg"); msg.hidden = mode !== "return"; msg.className = ""; msg.textContent = mode === "return" ? "準備好了，請掃第一本" : "";
+  if(!window.Html5Qrcode){ toast("掃描元件載入失敗，請用下方輸入框手動輸入"); closeScan(); return; }
+  const F = Html5QrcodeSupportedFormats;
+  scanner = new Html5Qrcode("reader", { formatsToSupport:[F.EAN_13, F.CODE_128, F.UPC_A], experimentalFeatures:{ useBarCodeDetectorIfSupported:true }, verbose:false });
+  try{
+    await scanner.start({ facingMode:"environment" },
+      { fps:12, qrbox:(w, h) => ({ width:Math.max(120, Math.floor(Math.min(w * 0.86, 360))), height:Math.max(80, Math.floor(Math.min(h * 0.32, 160))) }) },
+      onScan, () => {});
+  }catch(e){
+    toast("無法開啟相機：" + (e && e.message ? e.message : e) + "。請確認已允許相機權限，且網址是 https。", 5000);
+    closeScan();
+  }
+}
+async function onScan(text){
+  const now = Date.now();
+  if(scanBusy) return;
+  if(text === lastCode && now - lastAt < 3000) return;
+  lastCode = text; lastAt = now;
+  if(navigator.vibrate) navigator.vibrate(60);
+  if(scanMode === "return"){
+    scanBusy = true;
+    const id = text.trim().toUpperCase(), c = state.copies[id], msg = $("#scanMsg");
+    if(c && c.status === "out"){
+      const l = state.loans[c.loanId] || {};
+      await returnCopy(id); returnCount++;
+      msg.className = "ok"; msg.textContent = `✓ ${id} ${l.borrowerName || ""} 已歸還（本次第 ${returnCount} 本）`;
+    } else if(c){
+      msg.className = "warn"; msg.textContent = `${id} 本來就在架上`;
+    } else {
+      msg.className = "warn"; msg.textContent = "這不是冊號標籤，請掃貼在書上的 " + COPY_PREFIX + " 開頭條碼";
+    }
+    scanBusy = false; return;
+  }
+  await closeScan();
+  handleCode(text);
+}
+async function closeScan(){
+  if(scanner){ try{ if(scanner.isScanning) await scanner.stop(); scanner.clear(); }catch(e){} scanner = null; }
+  $("#scanOverlay").hidden = true;
+  if(scanMode === "return" && returnCount) toast("本次共歸還 " + returnCount + " 本");
+  scanMode = "normal";
+}
+
+function handleCode(raw){
+  const code = String(raw).trim().toUpperCase();
+  if(!code) return;
+  if(state.copies[code]){
+    if(state.copies[code].status === "out") openSheet({ type:"copy-return", id:code });
+    else openBorrowForm(code);
+    return;
+  }
+  const isbn = normalizeIsbn(code);
+  if(isbn){
+    const bid = findBookByIsbn(isbn);
+    if(bid) openSheet({ type:"book", id:bid });
+    else openNewBook(isbn);
+    return;
+  }
+  toast("無法辨識「" + raw + "」：不是冊號也不是有效的 ISBN", 3500);
+}
+
+/* ========== 標籤列印 ========== */
+function printLabels(ids){
+  if(!ids.length){ toast("沒有要列印的標籤"); return; }
+  if(!window.JsBarcode){ toast("條碼元件載入失敗，請檢查網路"); return; }
+  const area = $("#printArea"); area.innerHTML = "";
+  for(let i = 0; i < ids.length; i += 24){
+    const pg = document.createElement("div"); pg.className = "label-sheet";
+    ids.slice(i, i + 24).forEach(id => {
+      const c = state.copies[id];
+      const el = document.createElement("div"); el.className = "label";
+      el.innerHTML = `<div class="l-top">${esc(CLASSROOM_NAME)}</div><svg></svg><div class="l-no">${esc(id)}</div><div class="l-title">${esc(bookTitle(c && c.bookId))}</div>`;
+      JsBarcode(el.querySelector("svg"), id, { format:"CODE128", width:2, height:50, displayValue:false, margin:0 });
+      pg.appendChild(el);
+    });
+    area.appendChild(pg);
+  }
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      if(confirm(`這 ${ids.length} 張標籤（${Math.ceil(ids.length / 24)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印，之後不會再出現在「列印未印標籤」。\n只是測試或只印了部分頁數，請按「取消」。`)){
+        const up = {}; ids.forEach(id => up["copies/" + id + "/labelPrinted"] = true);
+        db.ref(DB_ROOT).update(up).then(() => toast("已標記為已列印"));
+      }
+    }, 300);
+  }, 100);
+}
+
+/* ========== 匯入 ========== */
+let pendingImport = null;
+function catRows(){
+  const cnt = {};
+  Object.values(state.books).forEach(b => { if(b.category) cnt[b.category] = (cnt[b.category] || 0) + 1; });
+  return Object.keys(cnt).sort().map(c => `<div class="item"><div class="grow">${esc(c)}<div class="meta">${cnt[c]} 種</div></div>
+    <button class="btn sm" data-act="renameCat" data-cat="${esc(c)}">改名</button></div>`).join("");
+}
+document.addEventListener("change", async e => {
+  if(e.target.id !== "importFile") return;
+  const f = e.target.files[0]; if(!f) return;
+  const msg = $("#importMsg");
+  try{
+    const data = JSON.parse(await f.text());
+    const all = (data.books || []).filter(b => b && b.title)
+      .map(b => Object.assign({}, b, { copies:Math.min(50, Math.max(1, parseInt(b.copies, 10) || 1)) }));
+    const have = new Set(Object.values(state.books).map(b => (b.title || "").trim()));
+    const list = all.filter(b => !have.has(b.title.trim()));
+    const skip = all.length - list.length, total = list.reduce((s, b) => s + b.copies, 0);
+    const flagged = list.filter(b => b.note).length;
+    pendingImport = list.length ? list : null;
+    msg.innerHTML = `<div class="notice" style="margin-top:12px">檔案裡有 ${all.length} 種書。${skip ? `其中 ${skip} 種書庫已經有了，會略過。` : ""}<br>
+      將匯入 <b>${list.length} 種、${total} 冊</b>${flagged ? `，其中 ${flagged} 種有「待確認」備註` : ""}。</div>
+      ${list.length ? `<button class="btn big primary" data-act="doImport">確認匯入</button>` : ""}`;
+  }catch(err){ msg.innerHTML = `<div class="notice warn" style="margin-top:12px">讀不到這個檔案：${esc(err.message)}</div>`; }
+  e.target.value = "";
+});
+
+/* ========== 事件 ========== */
+const actions = {
+  scan: () => startScan("normal"),
+  scanReturn: () => startScan("return"),
+  closeScan: () => closeScan(),
+  closeSheet: () => closeSheet(),
+  manualBook: () => openNewBook(""),
+  openBook: el => openSheet({ type:"book", id:el.dataset.id }),
+  openStudent: el => openSheet({ type:"student", key:el.dataset.key }),
+  borrowForm: el => openBorrowForm(el.dataset.copy),
+  return: async el => {
+    const id = el.dataset.copy, c = state.copies[id], l = c && state.loans[c.loanId];
+    if(!confirm(`確認歸還 ${id}「${bookTitle(c && c.bookId)}」${l ? "（" + l.borrowerName + "）" : ""}？`)) return;
+    if(await returnCopy(id)) toast(id + " 已歸還");
+  },
+  returnAndClose: async el => { if(await returnCopy(el.dataset.copy)){ toast(el.dataset.copy + " 已歸還"); closeSheet(); } },
+  pickStu: el => { const s = state.students[el.dataset.id]; pick = { id:el.dataset.id, name:s.name }; renderPickResults(); },
+  pickOther: () => { pick = { id:null, name:$("#pickSearch").value.trim() }; renderPickResults(); },
+  doBorrow: async el => {
+    if(!pick || !pick.name) return;
+    const due = $("#pickDue").value || addDays(14);
+    el.disabled = true;
+    if(await borrowCopy(el.dataset.copy, pick, due)){ toast(`${el.dataset.copy} 已借給 ${pick.name}，${md(due)} 到期`, 3200); closeSheet(); }
+    else el.disabled = false;
+  },
+  saveNewBook: async el => {
+    const f = readBookForm();
+    if(!f.title){ toast("請輸入書名"); $("#fTitle").focus(); return; }
+    if(f.isbn && findBookByIsbn(f.isbn)){ toast("這個 ISBN 已經建檔過了"); openSheet({ type:"book", id:findBookByIsbn(f.isbn) }); return; }
+    const n = Math.min(50, Math.max(1, parseInt($("#fCount").value, 10) || 1));
+    el.disabled = true;
+    try{
+      const bookId = (f.isbn && !state.books[f.isbn]) ? f.isbn : ("N" + Date.now().toString(36).toUpperCase());
+      const ids = await allocCopyIds(n);
+      const up = {}; const now = Date.now();
+      up["books/" + bookId] = Object.assign(f, { createdAt:now });
+      ids.forEach(id => up["copies/" + id] = { bookId, status:"in", createdAt:now, labelPrinted:false });
+      await db.ref(DB_ROOT).update(up);
+      toast("已建立冊號 " + ids.join("、"), 3500);
+      openSheet({ type:"book", id:bookId });
+    }catch(e){ toast("儲存失敗：" + e.message, 4000); el.disabled = false; }
+  },
+  editBook: el => {
+    const b = state.books[el.dataset.id];
+    sheet = { type:"form", id:el.dataset.id };
+    setSheet("編輯書籍", bookFormHtml(b, false)); bindCoverInput();
+  },
+  saveEditBook: async el => {
+    const f = readBookForm(), id = el.dataset.id;
+    if(!f.title){ toast("請輸入書名"); return; }
+    await db.ref(DB_ROOT + "/books/" + id).update(f);
+    toast("已儲存"); openSheet({ type:"book", id });
+  },
+  linkIsbn: async el => {
+    const id = el.dataset.id, isbn = el.dataset.isbn, b = state.books[id];
+    if(!confirm(`把 ISBN ${isbn} 補到「${b.title}」？`)) return;
+    const up = { isbn };
+    const info = sheet && sheet.lookup;
+    if(info){
+      if(!b.cover && info.cover) up.cover = info.cover;
+      if(!b.author && info.author) up.author = info.author;
+      if(!b.publisher && info.publisher) up.publisher = info.publisher;
+      if(!b.year && info.year) up.year = info.year;
+    }
+    await db.ref(DB_ROOT + "/books/" + id).update(up);
+    toast("已補上 ISBN"); openSheet({ type:"book", id });
+  },
+  pickImport: () => $("#importFile").click(),
+  renameCat: async el => {
+    const from = el.dataset.cat;
+    const to = (prompt(`把分類「${from}」改名為：`, from) || "").trim();
+    if(!to || to === from) return;
+    const up = {};
+    Object.keys(state.books).forEach(id => { if(state.books[id].category === from) up["books/" + id + "/category"] = to; });
+    await db.ref(DB_ROOT).update(up);
+    toast(`已改名，共 ${Object.keys(up).length} 本`); actions.openSettings();
+  },
+  clearCover: () => { $("#fCover").value = ""; $("#coverPreview").innerHTML = coverHtml({ title:$("#fTitle").value }, true); },
+  addCopies: async el => {
+    const n = parseInt(prompt("要增加幾冊？", "1"), 10);
+    if(!n || n < 1 || n > 50) return;
+    const ids = await allocCopyIds(n), up = {}, now = Date.now();
+    ids.forEach(id => up["copies/" + id] = { bookId:el.dataset.id, status:"in", createdAt:now, labelPrinted:false });
+    await db.ref(DB_ROOT).update(up);
+    toast("已新增 " + ids.join("、"), 3500);
+  },
+  removeCopy: async el => {
+    const cps = copiesOf(el.dataset.id).filter(c => c.status !== "out");
+    if(!cps.length){ toast("沒有在架上的冊可以移除"); return; }
+    const id = (prompt("要移除哪一冊？（遺失或損壞）\n在架的冊號：" + cps.map(c => c.id).join("、")) || "").trim().toUpperCase();
+    if(!id) return;
+    if(!cps.some(c => c.id === id)){ toast("冊號不對，或那一冊目前借出中"); return; }
+    await db.ref(DB_ROOT + "/copies/" + id).remove();
+    toast(id + " 已移除");
+  },
+  deleteBook: async el => {
+    const id = el.dataset.id, cps = copiesOf(id);
+    if(cps.some(c => c.status === "out")){ toast("還有冊借出中，全部歸還後才能刪除"); return; }
+    if(!confirm(`刪除「${bookTitle(id)}」和它的 ${cps.length} 冊？借閱歷史會保留書名。`)) return;
+    const up = {}; up["books/" + id] = null; cps.forEach(c => up["copies/" + c.id] = null);
+    await db.ref(DB_ROOT).update(up);
+    toast("已刪除"); closeSheet();
+  },
+  printBook: el => printLabels(copiesOf(el.dataset.id).map(c => c.id)),
+  printPending: () => printLabels(Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted).sort()),
+  copyLateList: async () => {
+    const late = activeLoans().filter(l => daysLeft(l.dueDate) < 0).sort((a, b) => a.borrowerName.localeCompare(b.borrowerName, "zh-Hant"));
+    if(!late.length){ toast("目前沒有逾期的書"); return; }
+    const txt = "【逾期未還書籍】" + ymd().replace(/-/g, "/") + "\n" +
+      late.map(l => `${l.borrowerName}　${bookTitle(l.bookId, l.bookTitle)}（${l.copyId}）${md(l.dueDate)} 到期，逾期 ${-daysLeft(l.dueDate)} 天`).join("\n");
+    try{ await navigator.clipboard.writeText(txt); toast("已複製 " + late.length + " 筆，可貼到 LINE"); }
+    catch(e){ prompt("請手動複製：", txt); }
+  },
+  openSettings: () => {
+    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    setSheet("設定", `
+      <label class="f"><span>預設借閱天數</span><input type="number" id="sDays" value="${state.settings.loanDays}" min="1" max="120" inputmode="numeric"></label>
+      <button class="btn big primary" data-act="saveSettings">儲存</button>
+      <h2 class="sec">匯入書籍</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選擇整理好的書庫匯入檔（.json）。書名相同的書會自動略過，不會重複建立。</p>
+      <button class="btn primary" data-act="pickImport">選擇匯入檔</button>
+      <input type="file" id="importFile" accept=".json,application/json" hidden>
+      <div id="importMsg"></div>
+      <h2 class="sec">分類名稱</h2>
+      <div class="list">${catRows() || `<div class="empty">還沒有分類</div>`}</div>
+      <h2 class="sec">資料備份</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 10px">下載所有書籍、冊號與借閱紀錄（JSON 檔），建議每學期備份一次。</p>
+      <button class="btn" data-act="exportJson">下載備份</button>
+      <h2 class="sec">標籤規格</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0">A4 標籤貼紙 3 欄 × 8 列（每張 70 × 37 mm），列印時請選「實際大小／100%」、邊界「無」。</p>`);
+  },
+  doImport: async el => {
+    const list = pendingImport; if(!list) return;
+    el.disabled = true; el.textContent = "匯入中…";
+    try{
+      const total = list.reduce((s, b) => s + b.copies, 0);
+      const ids = await allocCopyIds(total);
+      const up = {}, now = Date.now(); let k = 0;
+      list.forEach((b, i) => {
+        const bookId = "N" + now.toString(36).toUpperCase() + String(i).padStart(4, "0");
+        up["books/" + bookId] = { isbn:"", title:b.title, author:b.author || "", publisher:b.publisher || "", year:b.year || "",
+          category:b.category || "", level:b.level || "", note:b.note || "", cover:"", createdAt:now, source:"import" };
+        for(let c = 0; c < b.copies; c++) up["copies/" + ids[k++]] = { bookId, status:"in", createdAt:now, labelPrinted:false };
+      });
+      await db.ref(DB_ROOT).update(up);
+      pendingImport = null;
+      toast(`匯入完成：${list.length} 種、${total} 冊（${ids[0]}～${ids[ids.length - 1]}）`, 5000);
+      closeSheet();
+    }catch(e){ toast("匯入失敗：" + e.message, 5000); el.disabled = false; el.textContent = "確認匯入"; }
+  },
+  saveSettings: async () => {
+    const d = Math.min(120, Math.max(1, parseInt($("#sDays").value, 10) || 14));
+    await db.ref(DB_ROOT + "/settings/loanDays").set(d);
+    toast("已儲存"); closeSheet();
+  },
+  exportJson: () => {
+    const data = { exportedAt:new Date().toISOString(), books:state.books, copies:state.copies, loans:state.loans, settings:state.settings };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type:"application/json" }));
+    a.download = "教室圖書備份_" + ymd() + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  },
+};
+
+document.addEventListener("click", e => {
+  const tab = e.target.closest("[data-tab]");
+  if(tab){
+    currentTab = tab.dataset.tab;
+    document.querySelectorAll("nav.tabbar button").forEach(b => b.classList.toggle("active", b === tab));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + currentTab));
+    window.scrollTo(0, 0); return;
+  }
+  const lc = e.target.closest("#loanChips .chip");
+  if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
+  const sc = e.target.closest("#stuChips .chip");
+  if(sc){ stuFilter = sc.dataset.filter; document.querySelectorAll("#stuChips .chip").forEach(c => c.classList.toggle("active", c === sc)); renderStudents(); return; }
+  const a = e.target.closest("[data-act]");
+  if(a && actions[a.dataset.act]){
+    if(!db && !["closeSheet","closeScan"].includes(a.dataset.act)){ toast("尚未連上資料庫"); return; }
+    actions[a.dataset.act](a);
+  }
+});
+$("#manualForm").addEventListener("submit", e => { e.preventDefault(); const v = $("#manualCode").value; $("#manualCode").value = ""; handleCode(v); });
+$("#loanSearch").addEventListener("input", renderLoans);
+$("#bookSearch").addEventListener("input", renderBooks);
+$("#stuSearchTab").addEventListener("input", renderStudents);
+document.addEventListener("keydown", e => { if(e.key === "Escape"){ if(!$("#scanOverlay").hidden) closeScan(); else closeSheet(); } });
+
+init();
+renderAll();
+</script>
+</body>
+</html>
