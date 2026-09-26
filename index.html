@@ -124,13 +124,21 @@ button.item:active{background:#F4F7F6}
 /* 底部抽屜 */
 .backdrop{position:fixed;inset:0;background:rgba(20,30,32,.45);z-index:40}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--bg);border-radius:18px 18px 0 0;
-  max-height:92vh;display:flex;flex-direction:column;max-width:760px;margin:0 auto;
+  max-height:92vh;max-height:92dvh;display:flex;flex-direction:column;max-width:760px;margin:0 auto;
   animation:up .22s ease-out}
 @keyframes up{from{transform:translateY(40px);opacity:.3}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.sheet{animation:none}}
 .sheet-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--line)}
 .sheet-head h3{margin:0;flex:1;font-size:17px}
-.sheet-body{overflow-y:auto;padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.sheet-body{overflow-y:auto;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
+/* 底部固定按鈕列：內容再長，儲存／取消按鈕都一直看得到 */
+.sheet-foot{position:sticky;bottom:calc(-16px - env(safe-area-inset-bottom,0px));margin:12px -16px calc(-16px - env(safe-area-inset-bottom,0px));
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bg);border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px;z-index:2}
+.sheet-foot .row2 .btn{padding:9px 10px}
+.mini{font-size:13px;color:var(--muted);margin:0 0 10px}
+details.notice summary{cursor:pointer;font-weight:700}
+.f-compact label.f{margin-bottom:9px}
+.f-compact input[type=text],.f-compact input[type=number]{padding:9px 11px}
 
 .book-head{display:flex;gap:16px;margin-bottom:16px}
 .book-head h4{font-family:var(--serif);font-size:21px;line-height:1.35;margin:0 0 6px}
@@ -834,27 +842,31 @@ function bookFormHtml(b, isNew){
   const cats = [...new Set(CAT_ORDER.concat(Object.values(state.books).map(x => x.category).filter(Boolean)))];
   return `
     <div id="lookupMsg"></div>
-    <div class="book-head" style="align-items:flex-end">
-      <div id="coverPreview">${coverHtml(b, true)}</div>
-      <div><label class="btn" for="coverFile">拍封面／選照片</label>
-      <input type="file" id="coverFile" accept="image/*" capture="environment" hidden>
-      ${b.cover ? `<button type="button" class="btn sm" data-act="clearCover" style="margin-top:8px">移除封面</button>` : ""}</div>
+    <div class="f-compact">
+    <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:9px">
+      <div id="coverPreview">${coverHtml(b)}</div>
+      <label class="f" style="flex:1;min-width:0;margin:0"><span>ISBN（輸入後按「查詢」）</span>
+        <div style="display:flex;gap:6px"><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" inputmode="numeric" placeholder="978 開頭 13 碼" style="flex:1;min-width:0">
+        <button type="button" class="btn primary" data-act="isbnLookup">查詢</button></div></label>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px"><label class="btn sm" for="coverFile">拍封面</label>
+      <input type="file" id="coverFile" accept="image/*" capture="environment" hidden>
+      ${b.cover ? `<button type="button" class="btn sm" data-act="clearCover">移除封面</button>` : ""}</div>
     <input type="hidden" id="fCover" value="${esc(b.cover || "")}">
-    <label class="f"><span>ISBN（輸入後按「查詢」自動帶入書籍資料）</span>
-      <div style="display:flex;gap:8px"><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" inputmode="numeric" placeholder="978 開頭 13 碼，沒有可留空" style="flex:1;min-width:0">
-      <button type="button" class="btn primary" data-act="isbnLookup">查詢</button></div></label>
     <label class="f"><span>書名（必填）</span><input type="text" id="fTitle" value="${esc(b.title || "")}"></label>
     <label class="f"><span>作者</span><input type="text" id="fAuthor" value="${esc(b.author || "")}"></label>
     <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
     <div class="f"><span style="display:block;font-size:14px;color:var(--muted);margin-bottom:6px">分類（書背貼紙的顏色）</span>
       <div class="chips" id="catPick" style="margin-bottom:0">${cats.map(c => `<button type="button" class="chip ${b.category === c ? "active" : ""}" data-pickcat="${esc(c)}">${catDot(c)}${esc(c)}</button>`).join("")}</div>
       <input type="hidden" id="fCat" value="${esc(b.category || "")}"></div>
-    ${isNew ? `<label class="f"><span>這本書有幾冊</span><input type="number" id="fCount" value="1" min="1" max="50" inputmode="numeric"></label>` : ""}
-    <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>
-    <div class="row2" style="margin-top:10px">
-      <button class="btn" data-act="closeSheet">取消</button>
-      ${isNew ? `<button class="btn" data-act="cancelAndScan">取消，掃下一本</button>` : `<button class="btn" data-act="openBook" data-id="${esc(sheet.id)}">不儲存，回上一頁</button>`}
+    ${isNew ? `<label class="f" style="display:flex;align-items:center;gap:10px"><span style="margin:0">這本書有幾冊</span><input type="number" id="fCount" value="1" min="1" max="50" inputmode="numeric" style="width:90px"></label>` : ""}
+    </div>
+    <div class="sheet-foot">
+      <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>
+      <div class="row2">
+        <button class="btn" data-act="closeSheet">取消</button>
+        ${isNew ? `<button class="btn" data-act="cancelAndScan">取消，掃下一本</button>` : `<button class="btn" data-act="openBook" data-id="${esc(sheet.id)}">不儲存，回上一頁</button>`}
+      </div>
     </div>`;
 }
 function bindCoverInput(){
@@ -863,7 +875,7 @@ function bindCoverInput(){
     try{
       const url = await compressImage(f, 320);
       $("#fCover").value = url;
-      $("#coverPreview").innerHTML = `<img class="cover lg" src="${url}" alt="">`;
+      $("#coverPreview").innerHTML = `<img class="cover" src="${url}" alt="">`;
     }catch(err){ toast("照片讀取失敗"); }
   });
 }
@@ -919,10 +931,10 @@ function similarBooks(title, onlyNoIsbn){
 async function openNewBook(isbn){
   sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
   const noIsbnCount = Object.values(state.books).filter(b => !b.isbn).length;
-  const linkHtml = isbn && noIsbnCount ? `<div class="notice" id="linkBox"><b>這本書已經建檔了嗎？</b><br>
-    書庫有 ${noIsbnCount} 本是從照片建檔、還沒有 ISBN 的書。如果這本就是其中之一，搜尋書名後點選，就會把 ISBN 補上，不會重複建檔。
-    <input type="search" id="linkSearch" placeholder="輸入書名關鍵字" style="margin-top:8px" autocomplete="off">
-    <div class="stu-results" id="linkResults" style="margin-bottom:0"></div></div>` : "";
+  const linkHtml = isbn && noIsbnCount ? `<details class="notice" id="linkBox" style="padding:8px 12px"><summary>這本書已經建檔了嗎？點這裡搜尋書庫</summary>
+    <div class="mini" style="margin:6px 0 0">搜尋書名後點選，會把 ISBN 補上，不會重複建檔。</div>
+    <input type="search" id="linkSearch" placeholder="輸入書名關鍵字" style="margin-top:6px" autocomplete="off">
+    <div class="stu-results" id="linkResults" style="margin-bottom:0"></div></details>` : "";
   setSheet("新增書籍", linkHtml + bookFormHtml({ isbn:isbn || "" }, true));
   bindCoverInput();
   if($("#linkSearch")) $("#linkSearch").addEventListener("input", () => {
@@ -936,7 +948,7 @@ async function openNewBook(isbn){
   await runLookup(isbn);
 }
 async function runLookup(isbn){
-  $("#lookupMsg").innerHTML = `<div class="notice">正在查詢 ISBN ${isbn} 的書籍資料…</div>`;
+  $("#lookupMsg").innerHTML = `<p class="mini">正在查詢 ISBN ${isbn} 的書籍資料…</p>`;
   const info = await lookupIsbn(isbn);
   if(!sheet || sheet.type !== "form" || !$("#fTitle")) return;
   sheet.lookup = info;
@@ -944,15 +956,14 @@ async function runLookup(isbn){
     if(!$("#fTitle").value) $("#fTitle").value = info.title;
     if(!$("#fAuthor").value) $("#fAuthor").value = info.author;
     if(!$("#fPub").value) $("#fPub").value = info.publisher;
-    if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }, true); }
-    $("#lookupMsg").innerHTML = `<div class="notice">已從 ${info.source} 帶入資料，請確認後儲存。</div>`;
+    if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }); }
+    $("#lookupMsg").innerHTML = `<p class="mini">✓ 已從${info.source}帶入資料，請確認後儲存。</p>`;
     // 自動比對：書庫裡是否已有同一本書（還沒補 ISBN 的）
     const sim = similarBooks(info.title, true);
     if(sim.length){
-      $("#lookupMsg").innerHTML = `<div class="notice warn"><b>書庫裡可能已經有這本書了！</b><br>
-        點選相符的書，會把 ISBN 補上，不會重複建立：
-        <div class="stu-results" style="margin:8px 0 0">${sim.map(x => `<button type="button" class="stu" data-act="linkIsbn" data-id="${esc(x.id)}" data-isbn="${isbn}">${esc(state.books[x.id].title)}<small>${copiesOf(x.id).length} 冊${state.books[x.id].category ? "・" + esc(state.books[x.id].category) : ""}</small></button>`).join("")}</div>
-        <div style="margin-top:8px;font-size:13px">都不是的話，確認下方資料後按「建立書籍」。（網路查到的書名：${esc(info.title)}）</div></div>`;
+      $("#lookupMsg").innerHTML = `<div class="notice warn" style="padding:8px 12px"><b>書庫裡可能已經有這本書！</b>點選相符的書補上 ISBN：
+        <div class="stu-results" style="margin:6px 0 0;max-height:150px">${sim.map(x => `<button type="button" class="stu" data-act="linkIsbn" data-id="${esc(x.id)}" data-isbn="${isbn}">${esc(state.books[x.id].title)}<small>${copiesOf(x.id).length} 冊${state.books[x.id].category ? "・" + esc(state.books[x.id].category) : ""}</small></button>`).join("")}</div>
+        <div style="margin-top:6px;font-size:13px">都不是 → 確認下方資料後建立。</div></div>`;
       if($("#linkBox")) $("#linkBox").hidden = true;
     }
   } else {
@@ -1512,7 +1523,7 @@ const actions = {
     await db.ref(DB_ROOT).update(up);
     toast(`已改名，共 ${Object.keys(up).length} 本`); actions.openSettings();
   },
-  clearCover: () => { $("#fCover").value = ""; $("#coverPreview").innerHTML = coverHtml({ title:$("#fTitle").value }, true); },
+  clearCover: () => { $("#fCover").value = ""; $("#coverPreview").innerHTML = coverHtml({ title:$("#fTitle").value }); },
   addCopies: async el => {
     const n = parseInt(prompt("要增加幾冊？", "1"), 10);
     if(!n || n < 1 || n > 50) return;
