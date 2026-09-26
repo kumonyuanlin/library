@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/iife/reader/index.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
 :root{
@@ -153,7 +153,17 @@ button.item:active{background:#F4F7F6}
 #scanOverlay{position:fixed;inset:0;z-index:60;background:#000;color:#fff;display:flex;flex-direction:column}
 #scanOverlay .bar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px}
 #scanOverlay .bar strong{flex:1;font-size:17px}
-#reader{flex:1;width:100%;overflow:hidden}
+#scanOverlay .btn{color:#111}
+#scanOverlay .btn.primary{color:#fff}
+#camWrap{position:relative;flex:1;overflow:hidden;background:#000}
+#camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#camGuide{position:absolute;left:5%;right:5%;top:50%;height:min(42%,48vw);transform:translateY(-50%);border:3px solid rgba(255,255,255,.95);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.42);transition:border-color .15s}
+#camGuide::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;background:rgba(255,80,80,.85)}
+#camGuide.hit{border-color:#7FD69B}
+#zoomBox{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:14px}
+#zoomBox input{flex:1}
+#scanManual{display:flex;gap:8px;margin:10px auto 0;max-width:420px}
+#scanManual input{flex:1;min-width:0;background:#fff;color:#111}
 #scanOverlay .hint{padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));text-align:center;font-size:15px;opacity:.9}
 #scanMsg{margin:0 16px;padding:12px;border-radius:10px;text-align:center;font-weight:700;font-size:17px;min-height:48px}
 #scanMsg.ok{background:var(--ok)}
@@ -289,12 +299,16 @@ button.item:active{background:#F4F7F6}
 </div>
 
 <div id="scanOverlay" hidden>
-  <div class="bar"><strong id="scanTitle">掃描</strong><button class="btn sm" data-act="closeScan">完成</button></div>
-  <div id="reader"></div>
+  <div class="bar"><strong id="scanTitle">掃描</strong>
+    <button class="btn sm" id="torchBtn" data-act="torch" hidden>手電筒</button>
+    <button class="btn sm" data-act="closeScan">完成</button></div>
+  <div id="camWrap"><video id="camVideo" playsinline muted autoplay></video><div id="camGuide"></div></div>
+  <div id="zoomBox" hidden><span>縮放</span><input type="range" id="zoomRange" step="0.1"></div>
   <div id="scanMsg" hidden></div>
-  <div class="hint"><span id="scanHint">對準書背的 ISBN 條碼或冊號標籤</span><br>
-    <label class="btn sm" style="margin-top:10px;background:#fff;color:#111">掃不到？改用拍照辨識<input type="file" id="snapFile" accept="image/*" capture="environment" hidden></label></div>
-  <div id="fileReader" style="display:none"></div>
+  <div class="hint"><span id="scanHint">把條碼放進框內，紅線對準條碼中間</span>
+    <form id="scanManual" autocomplete="off"><input type="text" id="scanManualInput" inputmode="numeric" placeholder="掃不到？輸入 ISBN 或冊號"><button class="btn sm primary" type="submit">查詢</button></form>
+    <label class="btn sm" style="margin-top:10px;background:#fff;color:#111">改用拍照辨識<input type="file" id="snapFile" accept="image/*" capture="environment" hidden></label></div>
+  <canvas id="camCanvas" hidden></canvas>
 </div>
 
 <div id="toast" hidden></div>
@@ -609,7 +623,7 @@ function renderBooks(){
   ids.forEach(id => { const l = state.books[id].level; if(l) lv[l] = (lv[l] || 0) + 1; });
   const lvKeys = Object.keys(lv).sort();
   const lvBox = $("#bookLevels");
-  lvBox.hidden = bookCat === "all" || !lvKeys.length;
+  lvBox.hidden = true; // 閱讀等級已不使用
   if(lvBox.hidden) bookLevel = "all";
   else {
     if(bookLevel !== "all" && !lv[bookLevel]) bookLevel = "all";
@@ -621,7 +635,7 @@ function renderBooks(){
     ids = ids.filter(id => {
       const b = state.books[id];
       const cps = copiesOf(id).map(c => c.id).join(" ");
-      return [b.title, b.author, b.publisher, b.isbn, b.category, b.level ? "等級" + b.level : "", cps].join(" ").toLowerCase().includes(q);
+      return [b.title, b.author, b.publisher, b.isbn, b.category, cps].join(" ").toLowerCase().includes(q);
     });
   }
   ids.sort((a, b) => (state.books[a].title || "").localeCompare(state.books[b].title || "", "zh-Hant"));
@@ -630,7 +644,7 @@ function renderBooks(){
     return `<button class="item" data-act="openBook" data-id="${esc(id)}">
       ${coverHtml(b)}
       <div class="grow"><div class="title">${esc(b.title)}</div>
-      <div class="meta">${esc(b.author || "")}${b.category ? "　" + esc(b.category) : ""}${b.level ? "　等級 " + esc(b.level) : ""}</div></div>
+      <div class="meta">${b.category ? catDot(b.category) + esc(b.category) + "　" : ""}${esc(b.author || "")}</div></div>
       <span class="tag ${inN ? "in" : "out"}">在架 ${inN}/${cps.length}</span>
     </button>`;
   }).join("") || `<div class="empty">${q ? "找不到符合的書。" : "書庫還是空的。按「掃描新增」掃書背的 ISBN 條碼開始建檔。"}</div>`;
@@ -704,10 +718,9 @@ function renderBookSheet(){
   setSheet("書籍資料", `
     <div class="book-head">${coverHtml(b, true)}
       <div><h4>${esc(b.title)}</h4>
-      <div class="meta">${esc(b.author || "作者未填")}<br>${esc(b.publisher || "")}${b.year ? "　" + esc(b.year) : ""}<br>
-      ${b.isbn ? "ISBN " + esc(b.isbn) : "無 ISBN"}${b.category ? "<br>分類：" + esc(b.category) : ""}${b.level ? "　等級 " + esc(b.level) : ""}</div></div>
+      <div class="meta">${esc(b.author || "作者未填")}<br>${esc(b.publisher || "")}<br>
+      ${b.isbn ? "ISBN " + esc(b.isbn) : "無 ISBN"}${b.category ? "<br>" + catDot(b.category) + esc(b.category) : ""}</div></div>
     </div>
-    ${b.note ? `<div class="notice">${esc(b.note)}</div>` : ""}
     <h2 class="sec" style="margin-top:0">各冊狀態（${cps.length} 冊）</h2>
     <div class="list">${rows || `<div class="empty">還沒有任何一冊，請按下方「增加冊數」。</div>`}</div>
     <div class="toolbar" style="margin-top:14px">
@@ -828,17 +841,15 @@ function bookFormHtml(b, isNew){
       ${b.cover ? `<button type="button" class="btn sm" data-act="clearCover" style="margin-top:8px">移除封面</button>` : ""}</div>
     </div>
     <input type="hidden" id="fCover" value="${esc(b.cover || "")}">
-    <label class="f"><span>ISBN</span><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" ${isNew && b.isbn ? "readonly" : ""} inputmode="numeric" placeholder="沒有可留空"></label>
+    <label class="f"><span>ISBN（輸入後按「查詢」自動帶入書籍資料）</span>
+      <div style="display:flex;gap:8px"><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" inputmode="numeric" placeholder="978 開頭 13 碼，沒有可留空" style="flex:1;min-width:0">
+      <button type="button" class="btn primary" data-act="isbnLookup">查詢</button></div></label>
     <label class="f"><span>書名（必填）</span><input type="text" id="fTitle" value="${esc(b.title || "")}"></label>
     <label class="f"><span>作者</span><input type="text" id="fAuthor" value="${esc(b.author || "")}"></label>
-    <div class="row2">
-      <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
-      <label class="f"><span>出版年</span><input type="text" id="fYear" value="${esc(b.year || "")}" inputmode="numeric"></label>
-    </div>
-    <label class="f"><span>分類</span><input type="text" id="fCat" value="${esc(b.category || "")}" list="catList" placeholder="例：低年級、科普、英文書">
-      <datalist id="catList">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
-    <label class="f"><span>閱讀等級（教材推薦圖書的字母，可留空）</span><input type="text" id="fLevel" value="${esc(b.level || "")}" placeholder="例：A～I"></label>
-    <label class="f"><span>備註</span><textarea id="fNote">${esc(b.note || "")}</textarea></label>
+    <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
+    <div class="f"><span style="display:block;font-size:14px;color:var(--muted);margin-bottom:6px">分類（書背貼紙的顏色）</span>
+      <div class="chips" id="catPick" style="margin-bottom:0">${cats.map(c => `<button type="button" class="chip ${b.category === c ? "active" : ""}" data-pickcat="${esc(c)}">${catDot(c)}${esc(c)}</button>`).join("")}</div>
+      <input type="hidden" id="fCat" value="${esc(b.category || "")}"></div>
     ${isNew ? `<label class="f"><span>這本書有幾冊</span><input type="number" id="fCount" value="1" min="1" max="50" inputmode="numeric"></label>` : ""}
     <button class="btn big primary" data-act="${isNew ? "saveNewBook" : "saveEditBook"}" ${isNew ? "" : `data-id="${esc(sheet.id)}"`}>${isNew ? "建立書籍並產生冊號" : "儲存變更"}</button>
     <div class="row2" style="margin-top:10px">
@@ -875,8 +886,8 @@ function readBookForm(){
   return {
     isbn: normalizeIsbn($("#fIsbn").value) || $("#fIsbn").value.replace(/[-\s]/g, ""),
     title: $("#fTitle").value.trim(), author: $("#fAuthor").value.trim(),
-    publisher: $("#fPub").value.trim(), year: $("#fYear").value.trim(),
-    category: $("#fCat").value.trim(), level: $("#fLevel").value.trim().toUpperCase(), note: $("#fNote").value.trim(), cover: $("#fCover").value
+    publisher: $("#fPub").value.trim(),
+    category: $("#fCat").value.trim(), cover: $("#fCover").value
   };
 }
 
@@ -921,7 +932,10 @@ async function openNewBook(isbn){
     $("#linkResults").innerHTML = ids.map(id => `<button type="button" class="stu" data-act="linkIsbn" data-id="${esc(id)}" data-isbn="${isbn}">${esc(state.books[id].title)}</button>`).join("")
       || `<span style="font-size:14px;color:var(--muted)">找不到，請直接在下方建立新書</span>`;
   });
-  if(!isbn){ $("#fTitle").focus(); return; }
+  if(!isbn){ $("#fIsbn").focus(); return; }
+  await runLookup(isbn);
+}
+async function runLookup(isbn){
   $("#lookupMsg").innerHTML = `<div class="notice">正在查詢 ISBN ${isbn} 的書籍資料…</div>`;
   const info = await lookupIsbn(isbn);
   if(!sheet || sheet.type !== "form" || !$("#fTitle")) return;
@@ -930,7 +944,6 @@ async function openNewBook(isbn){
     if(!$("#fTitle").value) $("#fTitle").value = info.title;
     if(!$("#fAuthor").value) $("#fAuthor").value = info.author;
     if(!$("#fPub").value) $("#fPub").value = info.publisher;
-    if(!$("#fYear").value) $("#fYear").value = info.year;
     if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }, true); }
     $("#lookupMsg").innerHTML = `<div class="notice">已從 ${info.source} 帶入資料，請確認後儲存。</div>`;
     // 自動比對：書庫裡是否已有同一本書（還沒補 ISBN 的）
@@ -967,32 +980,122 @@ async function startScan(mode){
     if(chk.problems.length) msg.className = "warn";
   } else msg.textContent = T[2];
   msg.hidden = !(mode === "return" || mode === "borrowFor");
-  if(!window.Html5Qrcode){ toast("掃描元件載入失敗，請用下方輸入框手動輸入"); closeScan(); return; }
-  const F = Html5QrcodeSupportedFormats;
-  scanner = new Html5Qrcode("reader", { formatsToSupport:[F.EAN_13, F.CODE_128, F.UPC_A], experimentalFeatures:{ useBarCodeDetectorIfSupported:true }, verbose:false });
-  try{
-    await scanner.start({ facingMode:"environment" },
-      { fps:15,
-        qrbox:(w, h) => ({ width:Math.max(150, Math.floor(w * 0.9)), height:Math.max(90, Math.floor(Math.min(h * 0.45, w * 0.5))) }),
-        videoConstraints:{ facingMode:"environment", width:{ ideal:1920 }, height:{ ideal:1080 }, advanced:[{ focusMode:"continuous" }] } },
-      onScan, () => {});
-  }catch(e){
-    toast("無法開啟相機：" + (e && e.message ? e.message : e) + "。請確認已允許相機權限，且網址是 https。", 5000);
-    closeScan();
+  $("#scanManualInput").value = "";
+  try{ await startCamera(); }
+  catch(e){
+    const m = $("#scanMsg"); m.hidden = false; m.className = "warn";
+    m.textContent = "無法開啟相機（" + (e && e.message ? e.message : e) + "），可以用下方輸入 ISBN 或拍照辨識";
   }
 }
+
+/* ---------- 相機與條碼辨識 ----------
+   辨識引擎：手機內建 BarcodeDetector（Android Chrome）＋ zxing-wasm（所有手機，含 iPhone），兩者輪流使用。
+   只辨識畫面上白框範圍（放大取樣），框外不看，所以看到的就是實際在掃的範圍。 */
+let cam = { stream:null, track:null, timer:0, frame:0, torch:false };
+let nativeDet = null, nativeChecked = false;
+async function getNativeDetector(){
+  if(nativeChecked) return nativeDet;
+  nativeChecked = true;
+  try{
+    if("BarcodeDetector" in window){
+      const f = await BarcodeDetector.getSupportedFormats();
+      if(f.includes("ean_13")) nativeDet = new BarcodeDetector({ formats:["ean_13", "code_128", "upc_a"].filter(x => f.includes(x)) });
+    }
+  }catch(e){ nativeDet = null; }
+  return nativeDet;
+}
+async function decodeCanvas(cv, useNative){
+  const nd = await getNativeDetector();
+  if(useNative && nd){
+    try{ const r = await nd.detect(cv); if(r.length && r[0].rawValue) return r[0].rawValue; }catch(e){}
+    if(!window.ZXingWASM) return null;
+  }
+  if(!window.ZXingWASM) return null;
+  const img = cv.getContext("2d", { willReadFrequently:true }).getImageData(0, 0, cv.width, cv.height);
+  const r = await ZXingWASM.readBarcodes(img, { formats:["EAN13", "Code128", "UPCA"], tryHarder:true, maxNumberOfSymbols:1 });
+  const ok = r.find(x => x.isValid && x.text);
+  return ok ? ok.text : null;
+}
+async function startCamera(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("這個瀏覽器不支援相機");
+  const video = $("#camVideo");
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:false,
+    video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+  cam.stream = stream; cam.track = stream.getVideoTracks()[0]; cam.frame = 0; cam.torch = false;
+  video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+  const caps = cam.track.getCapabilities ? cam.track.getCapabilities() : {};
+  const adv = {};
+  if(caps.focusMode && caps.focusMode.includes("continuous")) adv.focusMode = "continuous";
+  // 稍微放大 1.5 倍：手機不用貼太近，比較容易對焦
+  if(caps.zoom && caps.zoom.max >= 1.5) adv.zoom = Math.max(caps.zoom.min || 1, 1.5);
+  if(Object.keys(adv).length){ try{ await cam.track.applyConstraints({ advanced:[adv] }); }catch(e){} }
+  $("#torchBtn").hidden = !caps.torch;
+  const zb = $("#zoomBox"), zr = $("#zoomRange");
+  if(caps.zoom && caps.zoom.max > (caps.zoom.min || 1)){
+    zb.hidden = false; zr.min = caps.zoom.min || 1; zr.max = Math.min(caps.zoom.max, 5); zr.step = caps.zoom.step || 0.1;
+    zr.value = adv.zoom || caps.zoom.min || 1;
+  } else zb.hidden = true;
+  scheduleFrame();
+}
+function scheduleFrame(){ clearTimeout(cam.timer); cam.timer = setTimeout(scanFrame, 110); }
+async function scanFrame(){
+  if(!cam.stream) return;
+  const v = $("#camVideo");
+  if(v.readyState >= 2 && v.videoWidth && !scanBusy){
+    try{
+      // 把畫面上的白框，換算回攝影機原始畫面的位置（影片是 object-fit:cover）
+      const wrap = $("#camWrap").getBoundingClientRect(), g = $("#camGuide").getBoundingClientRect();
+      const vw = v.videoWidth, vh = v.videoHeight;
+      const sc = Math.max(wrap.width / vw, wrap.height / vh);
+      const offX = (vw * sc - wrap.width) / 2, offY = (vh * sc - wrap.height) / 2;
+      const padX = g.width * 0.06, padY = g.height * 0.15; // 框外多取一點，邊緣也掃得到
+      let sx = (g.left - wrap.left - padX + offX) / sc, sy = (g.top - wrap.top - padY + offY) / sc;
+      let sw = (g.width + padX * 2) / sc, sh = (g.height + padY * 2) / sc;
+      sx = Math.max(0, sx); sy = Math.max(0, sy); sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+      const k = Math.min(1, 1400 / sw);
+      const cv = $("#camCanvas"); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
+      cv.getContext("2d", { willReadFrequently:true }).drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+      cam.frame++;
+      const text = await decodeCanvas(cv, cam.frame % 2 === 0);
+      if(text && cam.stream){
+        const gEl = $("#camGuide"); gEl.classList.add("hit"); setTimeout(() => gEl.classList.remove("hit"), 400);
+        await onScan(text);
+      }
+    }catch(e){ console.warn(e); }
+  }
+  if(cam.stream) scheduleFrame();
+}
+function stopCamera(){
+  clearTimeout(cam.timer);
+  if(cam.stream){ cam.stream.getTracks().forEach(t => t.stop()); }
+  cam.stream = null; cam.track = null;
+  const v = $("#camVideo"); if(v) v.srcObject = null;
+}
+$("#zoomRange").addEventListener("input", e => {
+  if(cam.track) cam.track.applyConstraints({ advanced:[{ zoom:parseFloat(e.target.value) }] }).catch(() => {});
+});
+$("#scanManual").addEventListener("submit", async e => {
+  e.preventDefault();
+  const v = $("#scanManualInput").value.trim(); if(!v) return;
+  $("#scanManualInput").value = ""; $("#scanManualInput").blur();
+  lastCode = ""; await onScan(v);
+});
 /* 備用：用手機相機拍一張照片來辨識（對焦較好，iPhone 特別適用） */
 document.addEventListener("change", async e => {
   if(e.target.id !== "snapFile") return;
   const file = e.target.files[0]; e.target.value = "";
   if(!file) return;
-  const F = Html5QrcodeSupportedFormats;
-  const fr = new Html5Qrcode("fileReader", { formatsToSupport:[F.EAN_13, F.CODE_128, F.UPC_A], verbose:false });
   try{
-    const text = await fr.scanFile(file, false);
-    lastCode = ""; await onScan(text);
-  }catch(err){ toast("照片裡找不到條碼，請靠近一點、拍清楚條碼再試一次", 3500); }
-  try{ fr.clear(); }catch(_){}
+    const bmp = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(file); });
+    const k = Math.min(1, 2200 / Math.max(bmp.naturalWidth, bmp.naturalHeight));
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.naturalWidth * k); cv.height = Math.round(bmp.naturalHeight * k);
+    cv.getContext("2d", { willReadFrequently:true }).drawImage(bmp, 0, 0, cv.width, cv.height);
+    URL.revokeObjectURL(bmp.src);
+    const text = (await decodeCanvas(cv, true)) || (await decodeCanvas(cv, false));
+    if(text){ lastCode = ""; await onScan(text); }
+    else toast("照片裡找不到條碼，請靠近一點、讓條碼清楚又平整再拍一次", 3500);
+  }catch(err){ toast("照片讀取失敗", 3000); }
 });
 async function onScan(text){
   const now = Date.now();
@@ -1000,6 +1103,7 @@ async function onScan(text){
   if(text === lastCode && now - lastAt < 3000) return;
   lastCode = text; lastAt = now;
   if(navigator.vibrate) navigator.vibrate(60);
+  text = String(text).trim();
   if(scanMode === "return"){
     scanBusy = true;
     const id = text.trim().toUpperCase(), c = state.copies[id], msg = $("#scanMsg");
@@ -1044,7 +1148,7 @@ async function onScan(text){
   handleCode(text);
 }
 async function closeScan(){
-  if(scanner){ try{ if(scanner.isScanning) await scanner.stop(); scanner.clear(); }catch(e){} scanner = null; }
+  stopCamera();
   $("#scanOverlay").hidden = true;
   if(scanMode === "return" && returnCount) toast("本次共歸還 " + returnCount + " 本");
   if(scanMode === "borrowFor" && borrowCount) toast(`${borrowFor.name} 這次借了 ${borrowCount} 本`);
@@ -1072,7 +1176,10 @@ function handleCode(raw){
     else openNewBook(isbn);
     return;
   }
-  toast("無法辨識「" + raw + "」：不是冊號也不是有效的 ISBN", 3500);
+  const digits = code.replace(/[-\s]/g, "");
+  if(/^97[89]\d{10}$/.test(digits)) toast("ISBN 最後一碼（檢查碼）對不上，請再確認一次數字", 3800);
+  else if(/^\d+$/.test(digits)) toast(`ISBN 應該是 13 碼（978 或 979 開頭），你輸入了 ${digits.length} 碼`, 3800);
+  else toast("無法辨識「" + raw + "」：不是冊號、學生條碼，也不是有效的 ISBN", 3500);
 }
 
 /* ========== 標籤列印 ========== */
@@ -1171,6 +1278,27 @@ const actions = {
   closeScan: () => closeScan(),
   closeSheet: () => closeSheet(),
   cancelAndScan: () => { closeSheet(); startScan("normal"); },
+  isbnLookup: async () => {
+    const raw = $("#fIsbn").value.trim(), isbn = normalizeIsbn(raw);
+    if(!isbn){
+      const d = raw.replace(/[-\s]/g, "");
+      toast(!d ? "請輸入 ISBN" : /^97[89]\d{10}$/.test(d) ? "ISBN 最後一碼（檢查碼）對不上，請再確認" : `ISBN 應該是 13 碼（978 或 979 開頭），目前是 ${d.length} 碼`, 3500);
+      return;
+    }
+    $("#fIsbn").value = isbn;
+    const exist = findBookByIsbn(isbn);
+    if(exist && exist !== (sheet && sheet.id)){
+      if(confirm(`這個 ISBN 已經建檔：「${state.books[exist].title}」\n要打開那本書嗎？`)) openSheet({ type:"book", id:exist });
+      return;
+    }
+    await runLookup(isbn);
+  },
+  torch: async () => {
+    if(!cam.track) return;
+    cam.torch = !cam.torch;
+    try{ await cam.track.applyConstraints({ advanced:[{ torch:cam.torch }] }); }catch(e){ cam.torch = false; }
+    $("#torchBtn").textContent = cam.torch ? "關手電筒" : "手電筒";
+  },
   manualBook: () => openNewBook(""),
   openBook: el => openSheet({ type:"book", id:el.dataset.id }),
   openStudent: el => openSheet({ type:"student", key:el.dataset.key }),
@@ -1193,6 +1321,7 @@ const actions = {
   saveNewBook: async el => {
     const f = readBookForm();
     if(!f.title){ toast("請輸入書名"); $("#fTitle").focus(); return; }
+    if(!f.category){ toast("請選擇分類（書背貼紙的顏色）"); return; }
     if(f.isbn && findBookByIsbn(f.isbn)){ toast("這個 ISBN 已經建檔過了"); openSheet({ type:"book", id:findBookByIsbn(f.isbn) }); return; }
     const same = similarBooks(f.title, false).filter(x => x.score >= 0.85);
     if(same.length && !confirm(`書庫裡已經有很像的書：\n\n${same.map(x => "・" + state.books[x.id].title + "（" + copiesOf(x.id).length + " 冊）").join("\n")}\n\n如果是同一本書，請按「取消」，改用上方的「這本書已經建檔了嗎？」補上 ISBN；要增加冊數請到那本書的頁面按「增加冊數」。\n\n確定這是不同的書、要另外建立嗎？`)) return;
@@ -1560,6 +1689,8 @@ document.addEventListener("click", e => {
   }
   const lc = e.target.closest("#loanChips .chip");
   if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
+  const pc = e.target.closest("[data-pickcat]");
+  if(pc){ $("#fCat").value = pc.dataset.pickcat; document.querySelectorAll("#catPick .chip").forEach(c => c.classList.toggle("active", c === pc)); return; }
   const pt = e.target.closest("[data-ptype]");
   if(pt){ pickType = pt.dataset.ptype; document.querySelectorAll("#pickType .chip").forEach(c => c.classList.toggle("active", c === pt));
     $("#pickDue").value = addDays(ruleOf(pickType).days); renderPickResults(); return; }
