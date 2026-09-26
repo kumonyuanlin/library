@@ -173,12 +173,11 @@ button.item:active{background:#F4F7F6}
   body{background:#fff;padding:0}
   body > *:not(#printArea){display:none!important}
   #printArea{display:block}
-  .label-sheet{width:210mm;display:grid;grid-template-columns:repeat(3,70mm);grid-auto-rows:37mm;page-break-after:always}
-  .label{padding:3mm 4mm;overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
-  .label .l-top{font-size:7.5pt;color:#333;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .label svg{width:56mm;height:14mm;margin:1mm 0}
-  .label .l-no{font-size:13pt;font-weight:700;letter-spacing:.08em}
-  .label .l-title{font-size:7.5pt;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .label-sheet{width:210mm;display:grid;page-break-after:always}
+  .label{box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;line-height:1.15}
+  .label .l-top,.label .l-title{color:#222;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .label svg{display:block}
+  .label .l-no{font-weight:700;letter-spacing:.08em}
 }
 </style>
 </head>
@@ -241,8 +240,10 @@ button.item:active{background:#F4F7F6}
     <div class="toolbar">
       <button class="btn primary" data-act="scan">掃描新增</button>
       <button class="btn" data-act="manualBook">手動新增</button>
-      <button class="btn" data-act="printPending" id="printPendingBtn">列印未印標籤</button>
+      <button class="btn" data-act="openPrint" id="printPendingBtn">列印標籤</button>
     </div>
+    <div class="chips" id="bookCats"></div>
+    <div class="chips" id="bookLevels" hidden></div>
     <div class="list" id="bookList"></div>
   </section>
 
@@ -250,12 +251,14 @@ button.item:active{background:#F4F7F6}
   <section class="tab-panel" id="tab-students">
     <div class="toolbar">
       <input type="search" id="stuSearchTab" placeholder="搜尋學生姓名或暱稱">
+      <button class="btn primary" data-act="addStudents">新增學生</button>
     </div>
     <div class="chips" id="stuChips">
       <button class="chip active" data-filter="borrowing">目前有借書</button>
       <button class="chip" data-filter="all">全部學生</button>
     </div>
     <div class="list" id="studentList"></div>
+    <div id="removedBox" style="margin-top:14px"></div>
   </section>
 </main>
 
@@ -295,16 +298,21 @@ const FIREBASE_CONFIG = {
   projectId: "kumonyuanlin-a11bd",
 };
 const DB_ROOT = "library";                        // 本系統資料路徑
-const STUDENT_PATH = "learningReports/students";  // 學生名單（唯讀，沿用學習報告系統）
+const STUDENT_PATH = "learningReports/students";  // 學習報告系統的學生名單（本系統只讀，不修改）
+// 本系統自己新增的學生存在 library/extraStudents；「移除」學習報告系統的學生只是在 library/hiddenStudents 標記隱藏
 const COPY_PREFIX = "B";                          // 冊號前綴，例：B0001
 const CLASSROOM_NAME = "KUMON 員林大同正興教室";
 
 /* ========== 狀態 ========== */
 let db = null;
-const state = { books:{}, copies:{}, loans:{}, settings:{ loanDays:14 }, students:{} };
+const state = { reportStudents:{}, extraStudents:{}, hiddenStudents:{}, books:{}, copies:{}, loans:{}, settings:{ loanDays:14, studentLimit:2, parentDays:28, parentLimit:1, banFrom:"due" }, students:{} };
 let currentTab = "home";
 let sheet = null;          // {type, id, ...}
-let loanFilter = "all", stuFilter = "borrowing";
+let loanFilter = "all", stuFilter = "borrowing", bookCat = "all", bookLevel = "all";
+const CAT_ORDER = ["幼兒繪本", "低年級", "中年級", "高年級", "教材推薦書", "科普", "英文書", "家長"];
+const CAT_COLOR = { "幼兒繪本":"#E53935", "低年級":"#2B9BD8", "中年級":"#E8BC00", "高年級":"#1E9B4F", "教材推薦書":"#A9A9A9", "科普":"#7B6CC0", "英文書":"#D4B26A", "家長":"#7B4A2E" };
+const CAT_RENAME = { "高年級以上":"高年級", "綠標（高年級以上）":"高年級", "教材推薦圖書":"教材推薦書", "科普類":"科普", "黃標":"中年級", "藍標":"低年級" };
+function catDot(c){ return CAT_COLOR[c] ? `<span style="color:${CAT_COLOR[c]};font-size:15px;line-height:1">●</span> ` : ""; }
 
 /* ========== 小工具 ========== */
 const $ = s => document.querySelector(s);
@@ -386,6 +394,31 @@ function loanStatus(l){
   if(d === 0) return { cls:"out", text:"今天到期" };
   return { cls:"out", text:"剩 " + d + " 天" };
 }
+/* 借書規則：學生每次限借 2 本 14 天、家長每次限借 1 本 28 天；逾期停借一個週期 */
+function ruleOf(type){
+  const st = state.settings;
+  return type === "parent" ? { days:+st.parentDays || 28, limit:+st.parentLimit || 1, label:"家長" }
+                           : { days:+st.loanDays || 14, limit:+st.studentLimit || 2, label:"學生" };
+}
+function personKey(id, name, type){ return (id ? "s:" + id : "n:" + name) + "|" + (type || "student"); }
+function loanPersonKey(l){ return personKey(l.studentId, l.baseName || l.borrowerName, l.borrowerType); }
+function checkBorrow(p){
+  const r = ruleOf(p.type), key = personKey(p.id, p.name, p.type);
+  const mine = Object.values(state.loans).filter(l => loanPersonKey(l) === key);
+  const active = mine.filter(l => !l.returnedAt);
+  const problems = [];
+  const late = active.filter(l => daysLeft(l.dueDate) < 0);
+  if(late.length) problems.push(`有 ${late.length} 本逾期未還（${late.map(l => bookTitle(l.bookId, l.bookTitle)).join("、")}），請先歸還`);
+  if(active.length >= r.limit) problems.push(`${r.label}每次限借 ${r.limit} 本，目前已借 ${active.length} 本，要先還書才能再借`);
+  let banUntil = "";
+  mine.filter(l => l.returnedAt && ymd(new Date(l.returnedAt)) > l.dueDate).forEach(l => {
+    const d = state.settings.banFrom === "return" ? new Date(l.returnedAt) : new Date(l.dueDate + "T00:00:00");
+    d.setDate(d.getDate() + r.days);
+    const u = ymd(d); if(u > banUntil) banUntil = u;
+  });
+  if(banUntil && banUntil > ymd()) problems.push(`之前逾期還書，停借到 ${md(banUntil)}（含）前`);
+  return { problems, active:active.length, r };
+}
 function bookTitle(bookId, fallback){ const b = state.books[bookId]; return b ? b.title : (fallback || "（書籍已刪除）"); }
 function coverHtml(book, lg){
   const cls = "cover" + (lg ? " lg" : "");
@@ -405,12 +438,30 @@ function init(){
   ["books","copies","loans","settings"].forEach(k => {
     db.ref(DB_ROOT + "/" + k).on("value", snap => {
       state[k] = snap.val() || {};
-      if(k === "settings") state.settings = Object.assign({ loanDays:14 }, state.settings);
+      if(k === "settings") state.settings = Object.assign({ loanDays:14, studentLimit:2, parentDays:28, parentLimit:1, banFrom:"due" }, state.settings);
+      if(k === "books") migrateCategories();
       scheduleRender();
     }, err => showSetup("無法讀取圖書資料（" + err.code + "）。請到 Firebase 主控台的 Realtime Database 規則，允許讀寫 library 路徑。"));
   });
-  db.ref(STUDENT_PATH).on("value", snap => { state.students = snap.val() || {}; scheduleRender(); },
+  ["extraStudents", "hiddenStudents"].forEach(k => db.ref(DB_ROOT + "/" + k).on("value", snap => { state[k] = snap.val() || {}; mergeStudents(); }));
+  db.ref(STUDENT_PATH).on("value", snap => { state.reportStudents = snap.val() || {}; mergeStudents(); },
     err => showSetup("無法讀取學生名單（" + err.code + "）。"));
+}
+let catMigrated = false;
+function migrateCategories(){
+  if(catMigrated) return; catMigrated = true;
+  const up = {};
+  Object.keys(state.books).forEach(id => { const n = CAT_RENAME[state.books[id].category]; if(n) up["books/" + id + "/category"] = n; });
+  if(Object.keys(up).length) db.ref(DB_ROOT).update(up).then(() => toast(`已依書庫規則統一分類名稱（${Object.keys(up).length} 本）`, 3500));
+}
+function mergeStudents(){
+  const m = {};
+  Object.keys(state.reportStudents).forEach(id => { if(!state.hiddenStudents[id]) m[id] = state.reportStudents[id]; });
+  Object.keys(state.extraStudents).forEach(id => { m[id] = state.extraStudents[id]; });
+  state.students = m; scheduleRender();
+}
+function removedStudents(){
+  return Object.keys(state.hiddenStudents).filter(id => state.reportStudents[id]).map(id => ({ id, name:state.reportStudents[id].name }));
 }
 function showSetup(msg){ const b = $("#setupBanner"); b.textContent = msg; b.hidden = false; }
 
@@ -432,7 +483,8 @@ async function borrowCopy(copyId, borrower, dueDate){
   const loanId = db.ref().push().key;
   const up = {};
   up["loans/" + loanId] = { copyId, bookId:c.bookId, bookTitle:bookTitle(c.bookId), studentId:borrower.id || null,
-    borrowerName:borrower.name, borrowedAt:Date.now(), dueDate, returnedAt:null };
+    borrowerName:borrower.type === "parent" ? borrower.name + "（家長）" : borrower.name, baseName:borrower.name,
+    borrowerType:borrower.type || "student", borrowedAt:Date.now(), dueDate, returnedAt:null };
   up["copies/" + copyId + "/status"] = "out";
   up["copies/" + copyId + "/loanId"] = loanId;
   await db.ref(DB_ROOT).update(up);
@@ -499,8 +551,32 @@ function renderLoans(){
 function renderBooks(){
   const q = $("#bookSearch").value.trim().toLowerCase();
   const pending = Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted).length;
-  const pb = $("#printPendingBtn"); pb.textContent = "列印未印標籤（" + pending + "）"; pb.disabled = !pending;
+  const pb = $("#printPendingBtn"); pb.textContent = pending ? "列印標籤（未印 " + pending + "）" : "列印標籤";
   let ids = Object.keys(state.books);
+  // 年級分類按鈕
+  const cnt = {};
+  ids.forEach(id => { const c = state.books[id].category || "未分類"; cnt[c] = (cnt[c] || 0) + 1; });
+  const cats = Object.keys(cnt).sort((a, b) => {
+    const ia = CAT_ORDER.indexOf(a), ib = CAT_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, "zh-Hant");
+  });
+  if(bookCat !== "all" && !cnt[bookCat]) bookCat = "all";
+  $("#bookCats").innerHTML = `<button class="chip ${bookCat === "all" ? "active" : ""}" data-bcat="all">全部（${ids.length}）</button>`
+    + cats.map(c => `<button class="chip ${bookCat === c ? "active" : ""}" data-bcat="${esc(c)}">${catDot(c)}${esc(c)}（${cnt[c]}）</button>`).join("");
+  if(bookCat !== "all") ids = ids.filter(id => (state.books[id].category || "未分類") === bookCat);
+  // 閱讀等級按鈕（該分類有等級資料時才顯示）
+  const lv = {};
+  ids.forEach(id => { const l = state.books[id].level; if(l) lv[l] = (lv[l] || 0) + 1; });
+  const lvKeys = Object.keys(lv).sort();
+  const lvBox = $("#bookLevels");
+  lvBox.hidden = bookCat === "all" || !lvKeys.length;
+  if(lvBox.hidden) bookLevel = "all";
+  else {
+    if(bookLevel !== "all" && !lv[bookLevel]) bookLevel = "all";
+    lvBox.innerHTML = `<button class="chip ${bookLevel === "all" ? "active" : ""}" data-blv="all">全部等級</button>`
+      + lvKeys.map(l => `<button class="chip ${bookLevel === l ? "active" : ""}" data-blv="${esc(l)}">${esc(l)}（${lv[l]}）</button>`).join("");
+    if(bookLevel !== "all") ids = ids.filter(id => state.books[id].level === bookLevel);
+  }
   if(q){
     ids = ids.filter(id => {
       const b = state.books[id];
@@ -531,7 +607,7 @@ function renderStudents(){
   } else {
     const seen = {};
     act.forEach(l => { const k = borrowerKey(l); if(!seen[k]){ seen[k] = 1; const s = l.studentId && state.students[l.studentId];
-      rows.push({ key:k, name:l.borrowerName, nick:s ? (s.nickname || "") : "" }); } });
+      rows.push({ key:k, name:(s && s.name) || l.baseName || l.borrowerName, nick:s ? (s.nickname || "") : "" }); } });
   }
   if(q) rows = rows.filter(r => (r.name + " " + r.nick).toLowerCase().includes(q));
   rows.sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh-Hant"));
@@ -543,7 +619,12 @@ function renderStudents(){
       ${late ? `<span class="tag late">逾期 ${late}</span>` : ""}
       ${n ? `<span class="tag out">借 ${n} 本</span>` : ""}
     </button>`;
-  }).join("") || `<div class="empty">${stuFilter === "borrowing" ? "目前沒有學生借書。" : "找不到學生。學生名單沿用學習報告系統，請在那邊新增。"}</div>`;
+  }).join("") || `<div class="empty">${stuFilter === "borrowing" ? "目前沒有學生借書。" : "找不到學生，可以按右上方「新增學生」。"}</div>`;
+  const rm = removedStudents();
+  $("#removedBox").innerHTML = stuFilter === "all" && rm.length
+    ? `<details><summary style="cursor:pointer;color:var(--muted);font-size:14px">已移除的學生（${rm.length}）</summary>
+       <div class="list" style="margin-top:8px">${rm.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant")).map(r => `<div class="item"><div class="grow">${esc(r.name)}</div>
+       <button class="btn sm" data-act="restoreStudent" data-id="${esc(r.id)}">恢復</button></div>`).join("")}</div></details>` : "";
 }
 
 /* ========== 抽屜 ========== */
@@ -614,7 +695,11 @@ function renderStudentSheet(){
   const name = sid ? (studentName(sid) || (loans[0] && loans[0].borrowerName) || "") : key.slice(2);
   const cur = loans.filter(l => !l.returnedAt).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const past = loans.filter(l => l.returnedAt).sort((a, b) => b.returnedAt - a.returnedAt);
-  setSheet(name + " 的借閱", `
+  const st = sid && state.students[sid];
+  const manage = st ? `<div class="toolbar">
+      <button class="btn" data-act="editStudent" data-id="${esc(sid)}">修改姓名</button>
+      <button class="btn danger" data-act="removeStudent" data-id="${esc(sid)}">從名單移除</button></div>` : "";
+  setSheet(name + " 的借閱", manage + `
     <h2 class="sec" style="margin-top:0">目前借閱（${cur.length}）</h2>
     <div class="list">${cur.map(l => { const st = loanStatus(l); return `<div class="item">
       <div class="grow"><div class="title">${esc(bookTitle(l.bookId, l.bookTitle))}</div>
@@ -627,16 +712,21 @@ function renderStudentSheet(){
 }
 
 /* ---------- 借書表單 ---------- */
-let pick = null; // {id, name}
+let pick = null, pickType = "student"; // pick: {id, name}
 function openBorrowForm(copyId){
   sheet = { type:"borrow", id:copyId }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
-  pick = null;
+  pick = null; pickType = "student";
   const c = state.copies[copyId], b = state.books[c.bookId];
   setSheet("借出", `
     <div class="book-head">${coverHtml(b)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${copyId}</span>　<span class="tag in">在架</span></div></div></div>
     <label class="f"><span>借閱學生</span><input type="search" id="pickSearch" placeholder="輸入姓名或暱稱搜尋" autocomplete="off"></label>
     <div class="stu-results" id="pickResults"></div>
-    <label class="f"><span>到期日（預設 ${state.settings.loanDays} 天）</span><input type="date" id="pickDue" value="${addDays(+state.settings.loanDays || 14)}"></label>
+    <div class="chips" id="pickType">
+      <button type="button" class="chip active" data-ptype="student">學生本人（限 ${ruleOf("student").limit} 本・${ruleOf("student").days} 天）</button>
+      <button type="button" class="chip" data-ptype="parent">家長（限 ${ruleOf("parent").limit} 本・${ruleOf("parent").days} 天）</button>
+    </div>
+    <label class="f"><span>到期日</span><input type="date" id="pickDue" value="${addDays(ruleOf("student").days)}"></label>
+    <div id="pickWarn"></div>
     <button class="btn big out" id="borrowBtn" data-act="doBorrow" data-copy="${copyId}" disabled>請先選擇學生</button>`);
   renderPickResults();
   $("#pickSearch").addEventListener("input", renderPickResults);
@@ -656,14 +746,25 @@ function renderPickResults(){
   if(q && !ids.length) html = `<button type="button" class="stu ${pick && !pick.id ? "sel" : ""}" data-act="pickOther">名單外借閱人：「${esc(q)}」</button>`;
   if(!Object.keys(state.students).length) html = `<div class="notice warn" style="width:100%">讀不到學生名單，可直接輸入姓名，再點「名單外借閱人」。</div>` + (q ? html : "");
   $("#pickResults").innerHTML = html;
-  const btn = $("#borrowBtn");
-  btn.disabled = !pick;
-  btn.textContent = pick ? "借給 " + pick.name : "請先選擇學生";
+  const btn = $("#borrowBtn"), warn = $("#pickWarn");
+  if(!pick){ btn.disabled = true; btn.textContent = "請先選擇學生"; warn.innerHTML = ""; return; }
+  const who = pick.name + (pickType === "parent" ? "（家長）" : "");
+  const chk = checkBorrow({ id:pick.id, name:pick.name, type:pickType });
+  if(chk.problems.length){
+    const ok = $("#pickOverride") && $("#pickOverride").checked;
+    warn.innerHTML = `<div class="notice warn"><b>依書庫規則不能借：</b><br>${chk.problems.map(esc).join("<br>")}
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pickOverride" ${ok ? "checked" : ""}> 老師特例允許借出</label></div>`;
+    $("#pickOverride").addEventListener("change", renderPickResults);
+    btn.disabled = !ok; btn.textContent = ok ? "特例借給 " + who : "不符合借書規則";
+  } else {
+    warn.innerHTML = chk.active ? `<div class="notice">目前已借 ${chk.active} 本，還可以再借 ${chk.r.limit - chk.active} 本。</div>` : "";
+    btn.disabled = false; btn.textContent = "借給 " + who;
+  }
 }
 
 /* ---------- 書籍表單（新增／編輯） ---------- */
 function bookFormHtml(b, isNew){
-  const cats = [...new Set(Object.values(state.books).map(x => x.category).filter(Boolean))];
+  const cats = [...new Set(CAT_ORDER.concat(Object.values(state.books).map(x => x.category).filter(Boolean)))];
   return `
     <div id="lookupMsg"></div>
     <div class="book-head" style="align-items:flex-end">
@@ -680,7 +781,7 @@ function bookFormHtml(b, isNew){
       <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
       <label class="f"><span>出版年</span><input type="text" id="fYear" value="${esc(b.year || "")}" inputmode="numeric"></label>
     </div>
-    <label class="f"><span>分類</span><input type="text" id="fCat" value="${esc(b.category || "")}" list="catList" placeholder="例：繪本、橋梁書、英文讀本">
+    <label class="f"><span>分類</span><input type="text" id="fCat" value="${esc(b.category || "")}" list="catList" placeholder="例：低年級、科普、英文書">
       <datalist id="catList">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
     <label class="f"><span>閱讀等級（教材推薦圖書的字母，可留空）</span><input type="text" id="fLevel" value="${esc(b.level || "")}" placeholder="例：A～I"></label>
     <label class="f"><span>備註</span><textarea id="fNote">${esc(b.note || "")}</textarea></label>
@@ -824,17 +925,37 @@ function handleCode(raw){
 }
 
 /* ========== 標籤列印 ========== */
+const LABEL_FORMATS = {
+  "60": { name:"60 格　42 × 24.8 mm（5 欄 × 12 列，例：鶴屋 B2542）", cols:5, rows:12, w:42, h:24.75, pad:"1.5mm 2mm", bw:34, bh:8.5, no:"8.5pt", tx:"5.5pt", top:false },
+  "44": { name:"44 格　52.5 × 27 mm（4 欄 × 11 列，例：龍德 LD-899）", cols:4, rows:11, w:52.5, h:27, pad:"2mm 3mm", bw:42, bh:10, no:"9.5pt", tx:"6pt", top:false },
+  "24": { name:"24 格　70 × 37 mm（3 欄 × 8 列，例：龍德 LD-802）", cols:3, rows:8, w:70, h:37.125, pad:"3mm 4mm", bw:56, bh:14, no:"13pt", tx:"7.5pt", top:true }
+};
+function labelFormat(){ return LABEL_FORMATS[state.settings.labelFormat] || LABEL_FORMATS["60"]; }
 function printLabels(ids){
   if(!ids.length){ toast("沒有要列印的標籤"); return; }
   if(!window.JsBarcode){ toast("條碼元件載入失敗，請檢查網路"); return; }
   const area = $("#printArea"); area.innerHTML = "";
-  for(let i = 0; i < ids.length; i += 24){
+  const f = labelFormat(), per = f.cols * f.rows;
+  for(let i = 0; i < ids.length; i += per){
     const pg = document.createElement("div"); pg.className = "label-sheet";
-    ids.slice(i, i + 24).forEach(id => {
+    pg.style.gridTemplateColumns = `repeat(${f.cols}, ${f.w}mm)`;
+    pg.style.gridAutoRows = `${f.h}mm`;
+    ids.slice(i, i + per).forEach(id => {
       const c = state.copies[id];
       const el = document.createElement("div"); el.className = "label";
-      el.innerHTML = `<div class="l-top">${esc(CLASSROOM_NAME)}</div><svg></svg><div class="l-no">${esc(id)}</div><div class="l-title">${esc(bookTitle(c && c.bookId))}</div>`;
+      el.style.padding = f.pad;
+      const title = `<div class="l-title" style="font-size:${f.tx}">${esc(bookTitle(c && c.bookId))}</div>`;
+      // 版面：冊號在上、條碼在中、書名在下（大標籤另外在最下方加教室名稱）
+      el.innerHTML = `<div class="l-no" style="font-size:${f.no}">${esc(id)}</div>`
+        + `<svg style="width:${f.bw}mm;height:${f.bh}mm;margin:0.6mm 0 1.4mm;overflow:hidden"></svg>`
+        + title
+        + (f.top ? `<div class="l-top" style="font-size:${f.tx};color:#666">${esc(CLASSROOM_NAME)}</div>` : "");
       JsBarcode(el.querySelector("svg"), id, { format:"CODE128", width:2, height:50, displayValue:false, margin:0 });
+      const sv = el.querySelector("svg");
+      sv.setAttribute("viewBox", `0 0 ${parseFloat(sv.getAttribute("width"))} ${parseFloat(sv.getAttribute("height"))}`);
+      sv.removeAttribute("width"); sv.removeAttribute("height");
+      sv.setAttribute("preserveAspectRatio", "none");
+      sv.style.cssText = `display:block;width:${f.bw}mm;height:${f.bh}mm;margin:0.6mm 0 1.4mm;flex:none`; // JsBarcode 會覆寫 style，需在之後設定
       pg.appendChild(el);
     });
     area.appendChild(pg);
@@ -842,7 +963,7 @@ function printLabels(ids){
   setTimeout(() => {
     window.print();
     setTimeout(() => {
-      if(confirm(`這 ${ids.length} 張標籤（${Math.ceil(ids.length / 24)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印，之後不會再出現在「列印未印標籤」。\n只是測試或只印了部分頁數，請按「取消」。`)){
+      if(confirm(`這 ${ids.length} 張標籤（${Math.ceil(ids.length / per)} 頁）都已經印好了嗎？\n\n按「確定」會標記為已列印，之後不會再出現在「列印未印標籤」。\n只是測試或只印了部分頁數，請按「取消」。`)){
         const up = {}; ids.forEach(id => up["copies/" + id + "/labelPrinted"] = true);
         db.ref(DB_ROOT).update(up).then(() => toast("已標記為已列印"));
       }
@@ -900,7 +1021,7 @@ const actions = {
     if(!pick || !pick.name) return;
     const due = $("#pickDue").value || addDays(14);
     el.disabled = true;
-    if(await borrowCopy(el.dataset.copy, pick, due)){ toast(`${el.dataset.copy} 已借給 ${pick.name}，${md(due)} 到期`, 3200); closeSheet(); }
+    if(await borrowCopy(el.dataset.copy, Object.assign({ type:pickType }, pick), due)){ toast(`${el.dataset.copy} 已借給 ${pick.name}${pickType === "parent" ? "（家長）" : ""}，${md(due)} 到期`, 3200); closeSheet(); }
     else el.disabled = false;
   },
   saveNewBook: async el => {
@@ -931,6 +1052,42 @@ const actions = {
     await db.ref(DB_ROOT + "/books/" + id).update(f);
     toast("已儲存"); openSheet({ type:"book", id });
   },
+  addStudents: () => {
+    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    setSheet("新增學生", `
+      <label class="f"><span>學生姓名（一行一位，可一次貼上多位）</span><textarea id="newStu" style="min-height:160px" placeholder="王小明\n李小華"></textarea></label>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 12px">已經在名單上的姓名會自動略過。新增的學生只會出現在圖書借閱，不會影響學習報告系統。</p>
+      <button class="btn big primary" data-act="saveStudents">新增</button>`);
+    $("#newStu").focus();
+  },
+  saveStudents: async () => {
+    const have = new Set(Object.values(state.students).map(x => (x.name || "").trim()));
+    const names = [...new Set($("#newStu").value.split(/\n|,|、/).map(x => x.trim()).filter(Boolean))];
+    const add = names.filter(n => !have.has(n));
+    if(!add.length){ toast(names.length ? "這些學生都已經在名單上了" : "請輸入姓名"); return; }
+    const up = {}, now = Date.now();
+    add.forEach((n, i) => up["extraStudents/x" + now.toString(36) + i] = { name:n, createdAt:now });
+    await db.ref(DB_ROOT).update(up);
+    toast(`已新增 ${add.length} 位` + (names.length > add.length ? `，略過 ${names.length - add.length} 位重複` : "")); closeSheet();
+  },
+  editStudent: async el => {
+    const id = el.dataset.id, cur = state.students[id].name;
+    const n = (prompt("修改姓名：", cur) || "").trim();
+    if(!n || n === cur) return;
+    if(state.extraStudents[id]) await db.ref(DB_ROOT + "/extraStudents/" + id + "/name").set(n);
+    else { alert("這位學生來自學習報告系統，請到學習報告系統修改姓名，兩邊會自動同步。"); return; }
+    toast("已修改");
+  },
+  removeStudent: async el => {
+    const id = el.dataset.id, s = state.students[id];
+    const n = activeLoans().filter(l => l.studentId === id).length;
+    if(n){ alert(`${s.name} 還有 ${n} 本書沒還（含家長借的），全部歸還後才能移除。`); return; }
+    if(!confirm(`把 ${s.name} 從借書名單移除？\n借閱紀錄會保留，之後可以在「全部學生」最下方恢復。`)) return;
+    if(state.extraStudents[id]) await db.ref(DB_ROOT + "/extraStudents/" + id).remove();
+    else await db.ref(DB_ROOT + "/hiddenStudents/" + id).set(true);
+    toast("已移除"); closeSheet();
+  },
+  restoreStudent: async el => { await db.ref(DB_ROOT + "/hiddenStudents/" + el.dataset.id).remove(); toast("已恢復"); },
   linkIsbn: async el => {
     const id = el.dataset.id, isbn = el.dataset.isbn, b = state.books[id];
     if(!confirm(`把 ISBN ${isbn} 補到「${b.title}」？`)) return;
@@ -982,6 +1139,45 @@ const actions = {
     toast("已刪除"); closeSheet();
   },
   printBook: el => printLabels(copiesOf(el.dataset.id).map(c => c.id)),
+  openPrint: () => {
+    sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
+    const all = Object.keys(state.copies), pend = all.filter(id => !state.copies[id].labelPrinted);
+    const cats = {};
+    all.forEach(id => { const b = state.books[state.copies[id].bookId]; const c = (b && b.category) || "未分類"; cats[c] = (cats[c] || 0) + 1; });
+    const f = labelFormat(), per = f.cols * f.rows;
+    setSheet("列印標籤", `
+      <div class="notice">目前標籤規格：${esc(f.name)}，每頁 ${per} 張。要換規格請到「設定」。</div>
+      <label class="f"><span>列印範圍</span>
+      <select id="pRange">
+        <option value="all">全部標籤（${all.length} 張，約 ${Math.ceil(all.length / per)} 頁）</option>
+        <option value="pending" ${pend.length ? "" : "disabled"}>只印未印過的（${pend.length} 張）</option>
+        ${Object.keys(cats).sort().map(c => `<option value="cat:${esc(c)}">分類：${esc(c)}（${cats[c]} 張）</option>`).join("")}
+      </select></label>
+      <label class="f"><span>或指定冊號範圍（可留空，例：B0001～B0060）</span>
+      <div class="row2"><input type="text" id="pFrom" placeholder="從 B0001"><input type="text" id="pTo" placeholder="到 B0060"></div></label>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 12px">調整版面時建議先填 B0001～B0060 只印一頁測試。</p>
+      <button class="btn big primary" data-act="doPrint">產生標籤並列印</button>`);
+  },
+  doPrint: () => {
+    const all = Object.keys(state.copies).sort();
+    const from = $("#pFrom").value.trim().toUpperCase(), to = $("#pTo").value.trim().toUpperCase();
+    let ids;
+    if(from || to){
+      ids = all.filter(id => (!from || id >= from) && (!to || id <= to));
+    } else {
+      const r = $("#pRange").value;
+      if(r === "pending") ids = all.filter(id => !state.copies[id].labelPrinted);
+      else if(r.indexOf("cat:") === 0){ const c = r.slice(4); ids = all.filter(id => { const b = state.books[state.copies[id].bookId]; return ((b && b.category) || "未分類") === c; }); }
+      else ids = all;
+    }
+    if(!ids.length){ toast("這個範圍沒有標籤"); return; }
+    closeSheet(); printLabels(ids);
+  },
+  resetLabels: async () => {
+    if(!confirm("把全部標籤都改回「未印」？（只影響列印紀錄，不會動到書籍和借閱資料）")) return;
+    const up = {}; Object.keys(state.copies).forEach(id => up["copies/" + id + "/labelPrinted"] = false);
+    await db.ref(DB_ROOT).update(up); toast("已全部改回未印");
+  },
   printPending: () => printLabels(Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted).sort()),
   copyLateList: async () => {
     const late = activeLoans().filter(l => daysLeft(l.dueDate) < 0).sort((a, b) => a.borrowerName.localeCompare(b.borrowerName, "zh-Hant"));
@@ -994,7 +1190,16 @@ const actions = {
   openSettings: () => {
     sheet = { type:"form" }; $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden";
     setSheet("設定", `
-      <label class="f"><span>預設借閱天數</span><input type="number" id="sDays" value="${state.settings.loanDays}" min="1" max="120" inputmode="numeric"></label>
+      <h2 class="sec" style="margin-top:0">借書規則</h2>
+      <div class="row2">
+        <label class="f"><span>學生每次限借（本）</span><input type="number" id="sLimit" value="${ruleOf("student").limit}" min="1" max="20" inputmode="numeric"></label>
+        <label class="f"><span>學生借期（天）</span><input type="number" id="sDays" value="${ruleOf("student").days}" min="1" max="120" inputmode="numeric"></label>
+        <label class="f"><span>家長每次限借（本）</span><input type="number" id="pLimit" value="${ruleOf("parent").limit}" min="1" max="20" inputmode="numeric"></label>
+        <label class="f"><span>家長借期（天）</span><input type="number" id="pDays" value="${ruleOf("parent").days}" min="1" max="120" inputmode="numeric"></label>
+      </div>
+      <label class="f"><span>逾期還書的停借期（一個週期）從哪天開始算</span>
+        <select id="sBan"><option value="due" ${state.settings.banFrom !== "return" ? "selected" : ""}>從到期日（截止日）算起</option>
+        <option value="return" ${state.settings.banFrom === "return" ? "selected" : ""}>從實際還書日算起</option></select></label>
       <button class="btn big primary" data-act="saveSettings">儲存</button>
       <h2 class="sec">匯入書籍</h2>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選擇整理好的書庫匯入檔（.json）。書名相同的書會自動略過，不會重複建立。</p>
@@ -1007,7 +1212,10 @@ const actions = {
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">下載所有書籍、冊號與借閱紀錄（JSON 檔），建議每學期備份一次。</p>
       <button class="btn" data-act="exportJson">下載備份</button>
       <h2 class="sec">標籤規格</h2>
-      <p style="font-size:14px;color:var(--muted);margin:0">A4 標籤貼紙 3 欄 × 8 列（每張 70 × 37 mm），列印時請選「實際大小／100%」、邊界「無」。</p>`);
+      <select id="sLabel" style="margin-bottom:8px">${Object.keys(LABEL_FORMATS).map(k => `<option value="${k}" ${labelFormat() === LABEL_FORMATS[k] ? "selected" : ""}>${LABEL_FORMATS[k].name}</option>`).join("")}</select>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選好後按下方「儲存標籤規格」。列印時請選「實際大小／100%」、邊界「無」，並取消「頁首和頁尾」。</p>
+      <button class="btn" data-act="saveLabelFmt">儲存標籤規格</button>
+      <button class="btn" data-act="resetLabels" style="margin-left:6px">全部改回未印</button>`);
   },
   doImport: async el => {
     const list = pendingImport; if(!list) return;
@@ -1028,9 +1236,14 @@ const actions = {
       closeSheet();
     }catch(e){ toast("匯入失敗：" + e.message, 5000); el.disabled = false; el.textContent = "確認匯入"; }
   },
+  saveLabelFmt: async () => {
+    await db.ref(DB_ROOT + "/settings/labelFormat").set($("#sLabel").value);
+    toast("已改為 " + LABEL_FORMATS[$("#sLabel").value].name.split("（")[0]);
+  },
   saveSettings: async () => {
-    const d = Math.min(120, Math.max(1, parseInt($("#sDays").value, 10) || 14));
-    await db.ref(DB_ROOT + "/settings/loanDays").set(d);
+    const num = (sel, def, max) => Math.min(max, Math.max(1, parseInt($(sel).value, 10) || def));
+    await db.ref(DB_ROOT + "/settings").update({ loanDays:num("#sDays", 14, 120), studentLimit:num("#sLimit", 2, 20),
+      parentDays:num("#pDays", 28, 120), parentLimit:num("#pLimit", 1, 20), banFrom:$("#sBan").value });
     toast("已儲存"); closeSheet();
   },
   exportJson: () => {
@@ -1052,6 +1265,13 @@ document.addEventListener("click", e => {
   }
   const lc = e.target.closest("#loanChips .chip");
   if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
+  const pt = e.target.closest("[data-ptype]");
+  if(pt){ pickType = pt.dataset.ptype; document.querySelectorAll("#pickType .chip").forEach(c => c.classList.toggle("active", c === pt));
+    $("#pickDue").value = addDays(ruleOf(pickType).days); renderPickResults(); return; }
+  const bc = e.target.closest("[data-bcat]");
+  if(bc){ bookCat = bc.dataset.bcat; bookLevel = "all"; renderBooks(); return; }
+  const bl = e.target.closest("[data-blv]");
+  if(bl){ bookLevel = bl.dataset.blv; renderBooks(); return; }
   const sc = e.target.closest("#stuChips .chip");
   if(sc){ stuFilter = sc.dataset.filter; document.querySelectorAll("#stuChips .chip").forEach(c => c.classList.toggle("active", c === sc)); renderStudents(); return; }
   const a = e.target.closest("[data-act]");
