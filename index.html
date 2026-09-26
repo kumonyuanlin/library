@@ -154,7 +154,6 @@ button.item:active{background:#F4F7F6}
 #scanOverlay .bar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px}
 #scanOverlay .bar strong{flex:1;font-size:17px}
 #reader{flex:1;width:100%;overflow:hidden}
-#reader video{object-fit:cover}
 #scanOverlay .hint{padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));text-align:center;font-size:15px;opacity:.9}
 #scanMsg{margin:0 16px;padding:12px;border-radius:10px;text-align:center;font-weight:700;font-size:17px;min-height:48px}
 #scanMsg.ok{background:var(--ok)}
@@ -281,7 +280,9 @@ button.item:active{background:#F4F7F6}
   <div class="bar"><strong id="scanTitle">掃描</strong><button class="btn sm" data-act="closeScan">完成</button></div>
   <div id="reader"></div>
   <div id="scanMsg" hidden></div>
-  <div class="hint" id="scanHint">對準書背的 ISBN 條碼或冊號標籤</div>
+  <div class="hint"><span id="scanHint">對準書背的 ISBN 條碼或冊號標籤</span><br>
+    <label class="btn sm" style="margin-top:10px;background:#fff;color:#111">掃不到？改用拍照辨識<input type="file" id="snapFile" accept="image/*" capture="environment" hidden></label></div>
+  <div id="fileReader" style="display:none"></div>
 </div>
 
 <div id="toast" hidden></div>
@@ -869,13 +870,28 @@ async function startScan(mode){
   scanner = new Html5Qrcode("reader", { formatsToSupport:[F.EAN_13, F.CODE_128, F.UPC_A], experimentalFeatures:{ useBarCodeDetectorIfSupported:true }, verbose:false });
   try{
     await scanner.start({ facingMode:"environment" },
-      { fps:12, qrbox:(w, h) => ({ width:Math.max(120, Math.floor(Math.min(w * 0.86, 360))), height:Math.max(80, Math.floor(Math.min(h * 0.32, 160))) }) },
+      { fps:15,
+        qrbox:(w, h) => ({ width:Math.max(150, Math.floor(w * 0.9)), height:Math.max(90, Math.floor(Math.min(h * 0.45, w * 0.5))) }),
+        videoConstraints:{ facingMode:"environment", width:{ ideal:1920 }, height:{ ideal:1080 }, advanced:[{ focusMode:"continuous" }] } },
       onScan, () => {});
   }catch(e){
     toast("無法開啟相機：" + (e && e.message ? e.message : e) + "。請確認已允許相機權限，且網址是 https。", 5000);
     closeScan();
   }
 }
+/* 備用：用手機相機拍一張照片來辨識（對焦較好，iPhone 特別適用） */
+document.addEventListener("change", async e => {
+  if(e.target.id !== "snapFile") return;
+  const file = e.target.files[0]; e.target.value = "";
+  if(!file) return;
+  const F = Html5QrcodeSupportedFormats;
+  const fr = new Html5Qrcode("fileReader", { formatsToSupport:[F.EAN_13, F.CODE_128, F.UPC_A], verbose:false });
+  try{
+    const text = await fr.scanFile(file, false);
+    lastCode = ""; await onScan(text);
+  }catch(err){ toast("照片裡找不到條碼，請靠近一點、拍清楚條碼再試一次", 3500); }
+  try{ fr.clear(); }catch(_){}
+});
 async function onScan(text){
   const now = Date.now();
   if(scanBusy) return;
