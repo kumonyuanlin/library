@@ -303,6 +303,7 @@ const STUDENT_PATH = "learningReports/students";  // 學習報告系統的學生
 // 本系統自己新增的學生存在 library/extraStudents；「移除」學習報告系統的學生只是在 library/hiddenStudents 標記隱藏
 const COPY_PREFIX = "B";                          // 冊號前綴，例：B0001
 const CLASSROOM_NAME = "KUMON 員林大同正興教室";
+const DEFAULT_ISBN_PROXY = "https://script.google.com/macros/s/AKfycbxqU6GMfwXxg6_PKjzC3qtdISrHrL9GRlpUt3tKQAUnkeRHEkVOWF9jrSIdTvzX18yauw/exec"; // ISBN 查詢小幫手（Google Apps Script）
 
 /* ========== 狀態 ========== */
 let db = null;
@@ -353,9 +354,23 @@ function normalizeIsbn(raw){
 }
 
 async function lookupIsbn(isbn){
+  // 先用「ISBN 查詢小幫手」（Google Apps Script，查國圖／博客來），同時向 Google Books 查封面
+  const proxy = (state.settings.isbnProxy || DEFAULT_ISBN_PROXY || "").trim();
+  const gb = fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn).then(r => r.json()).catch(() => null);
+  if(proxy){
+    try{
+      const j = await (await fetch(proxy + (proxy.indexOf("?") >= 0 ? "&" : "?") + "isbn=" + isbn)).json();
+      if(j && j.ok && j.title){
+        let cover = "";
+        const g = await gb;
+        if(g && g.items && g.items[0] && g.items[0].volumeInfo.imageLinks){ const il = g.items[0].volumeInfo.imageLinks; cover = (il.thumbnail || il.smallThumbnail || "").replace("http://", "https://"); }
+        return { title:j.title, author:j.author || "", publisher:j.publisher || "", year:j.year || "", cover, source:j.source || "查詢小幫手" };
+      }
+    }catch(e){ console.warn("ISBN 查詢小幫手", e); }
+  }
   try{
-    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn);
-    const j = await r.json();
+    const j = await gb;
+    if(!j) throw new Error("Google Books 無回應");
     if(j.items && j.items.length){
       const v = j.items[0].volumeInfo || {};
       const img = v.imageLinks ? (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail || "") : "";
@@ -1217,6 +1232,12 @@ const actions = {
         <select id="sBan"><option value="due" ${state.settings.banFrom !== "return" ? "selected" : ""}>從到期日（截止日）算起</option>
         <option value="return" ${state.settings.banFrom === "return" ? "selected" : ""}>從實際還書日算起</option></select></label>
       <button class="btn big primary" data-act="saveSettings">儲存</button>
+      <h2 class="sec">ISBN 查詢小幫手</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 8px">貼上 Google Apps Script 部署後的網址（https://script.google.com/macros/s/…/exec），掃描台灣出版的新書時就能自動帶出書名、作者、出版社。</p>
+      <input type="text" id="sProxy" value="${esc(state.settings.isbnProxy || DEFAULT_ISBN_PROXY)}" placeholder="https://script.google.com/macros/s/…/exec" style="margin-bottom:8px">
+      <div class="toolbar"><button class="btn primary" data-act="saveProxy">儲存網址</button>
+      <input type="text" id="sProxyTest" placeholder="測試用 ISBN" inputmode="numeric" style="flex:1;min-width:140px"><button class="btn" data-act="testProxy">測試</button></div>
+      <div id="proxyMsg"></div>
       <h2 class="sec">匯入書籍</h2>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選擇整理好的書庫匯入檔（.json）。書名相同的書會自動略過，不會重複建立。</p>
       <button class="btn primary" data-act="pickImport">選擇匯入檔</button>
@@ -1251,6 +1272,24 @@ const actions = {
       toast(`匯入完成：${list.length} 種、${total} 冊（${ids[0]}～${ids[ids.length - 1]}）`, 5000);
       closeSheet();
     }catch(e){ toast("匯入失敗：" + e.message, 5000); el.disabled = false; el.textContent = "確認匯入"; }
+  },
+  saveProxy: async () => {
+    const u = $("#sProxy").value.trim();
+    if(u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)){ toast("網址應該是 https://script.google.com/macros/s/… 開頭"); return; }
+    await db.ref(DB_ROOT + "/settings/isbnProxy").set(u); toast(u ? "已儲存查詢小幫手網址" : "已清除網址");
+  },
+  testProxy: async () => {
+    const u = $("#sProxy").value.trim(), isbn = normalizeIsbn($("#sProxyTest").value);
+    const msg = $("#proxyMsg");
+    if(!u){ toast("請先貼上網址"); return; }
+    if(!isbn){ toast("請輸入一本書的 ISBN（978 開頭 13 碼）"); return; }
+    msg.innerHTML = `<div class="notice">查詢中…（第一次約需 5～10 秒）</div>`;
+    try{
+      const j = await (await fetch(u + (u.indexOf("?") >= 0 ? "&" : "?") + "isbn=" + isbn + "&debug=1")).json();
+      msg.innerHTML = j.ok
+        ? `<div class="notice">成功（來源：${esc(j.source)}）<br><b>${esc(j.title)}</b><br>${esc(j.author)}　${esc(j.publisher)}　${esc(j.year)}</div>`
+        : `<div class="notice warn">小幫手有回應，但查不到這本書。<br><small>${esc((j.log || []).join(" ／ "))}</small></div>`;
+    }catch(e){ msg.innerHTML = `<div class="notice warn">連不到小幫手：${esc(e.message)}。請確認部署時「誰可以存取」選的是「所有人」。</div>`; }
   },
   saveLabelFmt: async () => {
     await db.ref(DB_ROOT + "/settings/labelFormat").set($("#sLabel").value);
