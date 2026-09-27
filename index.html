@@ -184,7 +184,7 @@ details.notice summary{cursor:pointer;font-weight:700}
 #dlgBox .row2 .btn{padding:12px}
 #dlgBox #dlgCancel[hidden]{display:none}
 #dlgBox .row2:has(#dlgCancel[hidden]){grid-template-columns:1fr}
-img.zoomable{cursor:zoom-in}
+img.zoomable,#sheetBody img.cover{cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,.1)}
 #zoomWrap{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:calc(env(safe-area-inset-top,0px) + 16px) 12px calc(env(safe-area-inset-bottom,0px) + 16px)}
 #zoomImg{max-width:100%;max-height:calc(100% - 40px);object-fit:contain;border-radius:6px;background:#fff;touch-action:pinch-zoom}
@@ -539,7 +539,7 @@ function checkBorrow(p){
 function bookTitle(bookId, fallback){ const b = state.books[bookId]; return b ? b.title : (fallback || "（書籍已刪除）"); }
 function coverHtml(book, lg){
   const cls = "cover" + (lg ? " lg" : "");
-  if(book && book.cover) return `<img class="${cls}${lg ? " zoomable" : ""}" src="${esc(book.cover)}" alt="${lg ? "點一下放大" : ""}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
+  if(book && book.cover) return `<img onclick="" class="${cls}${lg ? " zoomable" : ""}" src="${esc(book.cover)}" alt="${lg ? "點一下放大" : ""}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
   return `<div class="${cls}">${firstChar(book && book.title)}</div>`;
 }
 
@@ -1846,7 +1846,7 @@ document.addEventListener("click", e => {
   }
   const lc = e.target.closest("#loanChips .chip");
   if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
-  const zi = e.target.closest("img.zoomable");
+  const zi = e.target.closest("img.zoomable") || e.target.closest("#sheetBody img.cover");
   if(zi){ openZoom(zi.getAttribute("src")); return; }
   const ps = e.target.closest("[data-pickscan]");
   if(ps){ $("#fScanBy").value = ps.dataset.pickscan; document.querySelectorAll("#scanByPick .chip").forEach(c => c.classList.toggle("active", c === ps)); return; }
