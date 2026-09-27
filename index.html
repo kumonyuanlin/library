@@ -187,6 +187,7 @@ details.notice summary{cursor:pointer;font-weight:700}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar) + 16px + env(safe-area-inset-bottom,0px));
   z-index:70;background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:15px;max-width:90vw;text-align:center;
   box-shadow:0 6px 20px rgba(0,0,0,.2)}
+#loadingBar{background:#FFF6DC;color:#6B4309;padding:10px 16px;font-size:14px;text-align:center}
 #setupBanner{background:var(--late-soft);color:var(--late);padding:12px 16px;font-size:14px}
 
 /* 標籤列印 */
@@ -225,6 +226,7 @@ details.notice summary{cursor:pointer;font-weight:700}
   </button>
 </header>
 <div id="setupBanner" hidden></div>
+<div id="loadingBar">正在從雲端載入書庫資料…（網路慢時需要幾秒，資料不會不見）</div>
 
 <main>
   <!-- 借還 -->
@@ -365,6 +367,7 @@ let db = null;
 const state = { studentCodes:{}, reportStudents:{}, extraStudents:{}, hiddenStudents:{}, books:{}, copies:{}, loans:{}, settings:{ loanDays:14, studentLimit:2, parentDays:28, parentLimit:1, banFrom:"due" }, students:{} };
 let currentTab = "home";
 let sheet = null;          // {type, id, ...}
+let bookLimit = 120;
 let loanFilter = "all", stuFilter = "borrowing", bookCat = "all", bookLevel = "all";
 const CAT_ORDER = ["幼兒繪本", "低年級", "中年級", "高年級", "教材推薦書", "科普", "英文書", "家長"];
 const CAT_COLOR = { "幼兒繪本":"#E53935", "低年級":"#2B9BD8", "中年級":"#E8BC00", "高年級":"#1E9B4F", "教材推薦書":"#A9A9A9", "科普":"#7B6CC0", "英文書":"#D4B26A", "家長":"#7B4A2E" };
@@ -544,13 +547,21 @@ function init(){
   catch(e){ showSetup("Firebase 設定有誤：" + e.message); return; }
 
   db.ref(".info/connected").on("value", s => $("#conn").classList.toggle("on", !!s.val()));
-  ["books","copies","loans","settings","studentCodes"].forEach(k => {
+  const denied = err => showSetup("無法讀取圖書資料（" + err.code + "）。請到 Firebase 主控台的 Realtime Database 規則，允許讀寫 library 路徑。");
+  // 書籍、冊、借閱紀錄資料量大：逐筆同步（新增／修改／刪除哪一筆就只更新那一筆）
+  ["books","copies","loans"].forEach(k => {
+    const ref = db.ref(DB_ROOT + "/" + k);
+    ref.on("child_added",   c => { state[k][c.key] = c.val(); scheduleRender(); }, denied);
+    ref.on("child_changed", c => { state[k][c.key] = c.val(); scheduleRender(); });
+    ref.on("child_removed", c => { delete state[k][c.key]; scheduleRender(); });
+    ref.once("value").then(() => { loaded[k] = true; if(k === "books") migrateCategories(); scheduleRender(); });
+  });
+  ["settings","studentCodes"].forEach(k => {
     db.ref(DB_ROOT + "/" + k).on("value", snap => {
       state[k] = snap.val() || {};
       if(k === "settings") state.settings = Object.assign({ loanDays:14, studentLimit:2, parentDays:28, parentLimit:1, banFrom:"due" }, state.settings);
-      if(k === "books") migrateCategories();
       scheduleRender();
-    }, err => showSetup("無法讀取圖書資料（" + err.code + "）。請到 Firebase 主控台的 Realtime Database 規則，允許讀寫 library 路徑。"));
+    }, denied);
   });
   ["extraStudents", "hiddenStudents"].forEach(k => db.ref(DB_ROOT + "/" + k).on("value", snap => { state[k] = snap.val() || {}; mergeStudents(); }));
   db.ref(STUDENT_PATH).on("value", snap => { state.reportStudents = snap.val() || {}; mergeStudents(); },
@@ -584,8 +595,9 @@ async function ensureStudentCodes(sids){
 function removedStudents(){
   return Object.keys(state.hiddenStudents).filter(id => state.reportStudents[id]).map(id => ({ id, name:state.reportStudents[id].name }));
 }
-function showSetup(msg){ const b = $("#setupBanner"); b.textContent = msg; b.hidden = false; }
+function showSetup(msg){ const lb = document.getElementById("loadingBar"); if(lb) lb.hidden = true; const b = $("#setupBanner"); b.textContent = msg; b.hidden = false; }
 
+const loaded = { books:false, copies:false, loans:false };
 /* 多個節點的更新會分開觸發，集中到下一個時間點再一次重畫，避免畫到一半的資料 */
 let renderTimer = null;
 function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 30); }
@@ -623,10 +635,20 @@ async function returnCopy(copyId){
 
 /* ========== 畫面 ========== */
 function renderAll(){
-  renderHome(); renderLoans(); renderBooks(); renderStudents();
+  const ready = loaded.books && loaded.copies;
+  $("#loadingBar").hidden = ready;
+  if(currentTab === "home") renderHome();
+  else if(currentTab === "loans") renderLoans();
+  else if(currentTab === "books") renderBooks();
+  else if(currentTab === "students") renderStudents();
+  updateBadges();
   if(sheet && (sheet.type === "book" || sheet.type === "student" || sheet.type === "copy-return")) renderSheet();
 }
 
+function updateBadges(){
+  const late = activeLoans().filter(l => daysLeft(l.dueDate) < 0).length;
+  const badge = $("#lateBadge"); badge.hidden = !late; badge.textContent = late;
+}
 function renderHome(){
   const act = activeLoans();
   const late = act.filter(l => daysLeft(l.dueDate) < 0).length;
@@ -729,6 +751,8 @@ function renderBooks(){
     });
   }
   sortBookIds(ids, $("#bookSort").value);
+  const total = ids.length, more = total - bookLimit;
+  ids = ids.slice(0, bookLimit);
   $("#bookList").innerHTML = ids.map(id => {
     const b = state.books[id], cps = copiesOf(id), inN = cps.filter(c => c.status !== "out").length;
     return `<button class="item" data-act="openBook" data-id="${esc(id)}">
@@ -737,7 +761,8 @@ function renderBooks(){
       <div class="meta">${b.category ? catDot(b.category) + esc(b.category) + "　" : ""}${esc(b.author || "")}</div></div>
       <span class="tag ${inN ? "in" : "out"}">在架 ${inN}/${cps.length}</span>
     </button>`;
-  }).join("") || `<div class="empty">${q ? "找不到符合的書。" : "書庫還是空的。按「掃描新增」掃書背的 ISBN 條碼開始建檔。"}</div>`;
+  }).join("") + (more > 0 ? `<button class="item" data-act="moreBooks" style="justify-content:center;color:var(--primary);font-weight:700">顯示更多（還有 ${more} 本）</button>` : "")
+    || `<div class="empty">${q ? "找不到符合的書。" : "書庫還是空的。按「掃描新增」掃書背的 ISBN 條碼開始建檔。"}</div>`;
 }
 
 function renderStudents(){
@@ -1096,7 +1121,7 @@ async function startScan(mode){
 /* ---------- 相機與條碼辨識 ----------
    辨識引擎：手機內建 BarcodeDetector（Android Chrome）＋ zxing-wasm（所有手機，含 iPhone），兩者輪流使用。
    只辨識畫面上白框範圍（放大取樣），框外不看，所以看到的就是實際在掃的範圍。 */
-let cam = { stream:null, track:null, timer:0, frame:0, torch:false };
+let cam = { stream:null, track:null, timer:0, frame:0, torch:false, gen:0 };
 let nativeDet = null, nativeChecked = false;
 async function getNativeDetector(){
   if(nativeChecked) return nativeDet;
@@ -1125,7 +1150,8 @@ async function startCamera(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("這個瀏覽器不支援相機");
   const video = $("#camVideo");
   const stream = await navigator.mediaDevices.getUserMedia({ audio:false,
-    video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+    video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1280 }, height:{ ideal:720 } } }); // 1280 已足夠辨識，又比較省記憶體
+  cam.gen++;
   cam.stream = stream; cam.track = stream.getVideoTracks()[0]; cam.frame = 0; cam.torch = false;
   video.srcObject = stream;
   try{ await video.play(); }catch(e){}
@@ -1143,9 +1169,9 @@ async function startCamera(){
   } else zb.hidden = true;
   scheduleFrame();
 }
-function scheduleFrame(){ clearTimeout(cam.timer); cam.timer = setTimeout(scanFrame, 110); }
-async function scanFrame(){
-  if(!cam.stream) return;
+function scheduleFrame(){ const g = cam.gen; clearTimeout(cam.timer); cam.timer = setTimeout(() => scanFrame(g), 110); }
+async function scanFrame(gen){
+  if(!cam.stream || gen !== cam.gen) return;
   const v = $("#camVideo");
   if(v.readyState >= 2 && v.videoWidth && !scanBusy){
     try{
@@ -1158,8 +1184,9 @@ async function scanFrame(){
       let sx = (g.left - wrap.left - padX + offX) / sc, sy = (g.top - wrap.top - padY + offY) / sc;
       let sw = (g.width + padX * 2) / sc, sh = (g.height + padY * 2) / sc;
       sx = Math.max(0, sx); sy = Math.max(0, sy); sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
-      const k = Math.min(1, 1400 / sw);
-      const cv = $("#camCanvas"); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
+      const k = Math.min(1, 1000 / sw);
+      const cv = $("#camCanvas"), cw = Math.round(sw * k), ch = Math.round(sh * k);
+      if(cv.width !== cw) cv.width = cw; if(cv.height !== ch) cv.height = ch;
       cv.getContext("2d", { willReadFrequently:true }).drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
       cam.frame++;
       const text = await decodeCanvas(cv, cam.frame % 2 === 0);
@@ -1169,14 +1196,16 @@ async function scanFrame(){
       }
     }catch(e){ console.warn(e); }
   }
-  if(cam.stream) scheduleFrame();
+  if(cam.stream && gen === cam.gen) scheduleFrame();
 }
 function stopCamera(){
-  clearTimeout(cam.timer);
+  clearTimeout(cam.timer); cam.gen++;
   if(cam.stream){ cam.stream.getTracks().forEach(t => t.stop()); }
   cam.stream = null; cam.track = null;
   const v = $("#camVideo"); if(v) v.srcObject = null;
 }
+// 切到別的 App 或鎖螢幕時關掉相機，避免在背景一直耗電、佔記憶體
+document.addEventListener("visibilitychange", () => { if(document.hidden && cam.stream) closeScan(); });
 $("#zoomRange").addEventListener("input", e => {
   if(cam.track) cam.track.applyConstraints({ advanced:[{ zoom:parseFloat(e.target.value) }] }).catch(() => {});
 });
@@ -1402,6 +1431,7 @@ const actions = {
   scanReturn: () => startScan("return"),
   closeScan: () => closeScan(),
   closeSheet: () => closeSheet(),
+  moreBooks: () => { bookLimit += 200; renderBooks(); },
   cancelAndScan: () => { closeSheet(); startScan("normal"); },
   toggleScanBy: async el => {
     const id = el.dataset.id, toIsbn = !usesIsbn(id);
@@ -1826,7 +1856,7 @@ document.addEventListener("click", e => {
     currentTab = tab.dataset.tab;
     document.querySelectorAll("nav.tabbar button").forEach(b => b.classList.toggle("active", b === tab));
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + currentTab));
-    window.scrollTo(0, 0); return;
+    window.scrollTo(0, 0); renderAll(); return;
   }
   const lc = e.target.closest("#loanChips .chip");
   if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
@@ -1838,7 +1868,7 @@ document.addEventListener("click", e => {
   if(pt){ pickType = pt.dataset.ptype; document.querySelectorAll("#pickType .chip").forEach(c => c.classList.toggle("active", c === pt));
     $("#pickDue").value = addDays(ruleOf(pickType).days); renderPickResults(); return; }
   const bc = e.target.closest("[data-bcat]");
-  if(bc){ bookCat = bc.dataset.bcat; bookLevel = "all"; renderBooks(); return; }
+  if(bc){ bookCat = bc.dataset.bcat; bookLevel = "all"; bookLimit = 120; renderBooks(); return; }
   const bl = e.target.closest("[data-blv]");
   if(bl){ bookLevel = bl.dataset.blv; renderBooks(); return; }
   const sc = e.target.closest("#stuChips .chip");
@@ -1851,7 +1881,7 @@ document.addEventListener("click", e => {
 });
 $("#manualForm").addEventListener("submit", e => { e.preventDefault(); const v = $("#manualCode").value; $("#manualCode").value = ""; scanSource = "manual"; handleCode(v); });
 $("#loanSearch").addEventListener("input", renderLoans);
-$("#bookSearch").addEventListener("input", renderBooks);
+$("#bookSearch").addEventListener("input", () => { bookLimit = 120; renderBooks(); });
 $("#bookSort").addEventListener("change", renderBooks);
 $("#stuSearchTab").addEventListener("input", renderStudents);
 document.addEventListener("keydown", e => { if(e.key === "Escape"){ if(!$("#scanOverlay").hidden) closeScan(); else closeSheet(); } });
