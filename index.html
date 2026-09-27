@@ -184,11 +184,6 @@ details.notice summary{cursor:pointer;font-weight:700}
 #dlgBox .row2 .btn{padding:12px}
 #dlgBox #dlgCancel[hidden]{display:none}
 #dlgBox .row2:has(#dlgCancel[hidden]){grid-template-columns:1fr}
-img.zoomable,#sheetBody img.cover{cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,.1)}
-#zoomWrap{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:calc(env(safe-area-inset-top,0px) + 16px) 12px calc(env(safe-area-inset-bottom,0px) + 16px)}
-#zoomImg{max-width:100%;max-height:calc(100% - 40px);object-fit:contain;border-radius:6px;background:#fff;touch-action:pinch-zoom}
-#zoomHint{color:#ddd;font-size:14px;margin-top:12px}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar) + 16px + env(safe-area-inset-bottom,0px));
   z-index:70;background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:15px;max-width:90vw;text-align:center;
   box-shadow:0 6px 20px rgba(0,0,0,.2)}
@@ -337,10 +332,7 @@ img.zoomable,#sheetBody img.cover{cursor:pointer;-webkit-tap-highlight-color:rgb
 </div>
 
 <div id="toast" hidden></div>
-<div id="zoomWrap" hidden data-act="closeZoom">
-  <img id="zoomImg" alt="">
-  <div id="zoomHint">點一下任何地方關閉</div>
-</div>
+
 <div id="dlgWrap" hidden>
   <div class="backdrop" style="z-index:80"></div>
   <div id="dlgBox" role="dialog" aria-modal="true">
@@ -539,7 +531,7 @@ function checkBorrow(p){
 function bookTitle(bookId, fallback){ const b = state.books[bookId]; return b ? b.title : (fallback || "（書籍已刪除）"); }
 function coverHtml(book, lg){
   const cls = "cover" + (lg ? " lg" : "");
-  if(book && book.cover) return `<img onclick="" class="${cls}${lg ? " zoomable" : ""}" src="${esc(book.cover)}" alt="${lg ? "點一下放大" : ""}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
+  if(book && book.cover) return `<img class="${cls}" src="${esc(book.cover)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
   return `<div class="${cls}">${firstChar(book && book.title)}</div>`;
 }
 
@@ -782,21 +774,10 @@ function renderStudents(){
 /* ========== 抽屜 ========== */
 function openSheet(s){ sheet = s; showSheetWrap(); document.body.style.overflow = "hidden"; renderSheet(); $("#sheetBody").scrollTop = 0; }
 function closeSheet(){ sheet = null; $("#sheetWrap").hidden = true; document.body.style.overflow = ""; }
-/* 封面放大：Google Books 的縮圖改抓大尺寸，抓不到就用原圖 */
-function openZoom(src){
-  if(!src) return;
-  const img = $("#zoomImg");
-  let big = src;
-  if(/books\.google|googleusercontent/.test(src)) big = src.replace(/&edge=curl/, "").replace(/zoom=\d/, "zoom=0") + "&fife=w900";
-  img.onerror = () => { img.onerror = null; img.src = src; };
-  img.src = big;
-  $("#zoomWrap").hidden = false; pushUiState();
-}
 /* 手機「返回」鍵／手勢：關閉目前打開的畫面，而不是離開網站 */
 function pushUiState(){ if(!(history.state && history.state.ui)) history.pushState({ ui:1 }, ""); }
 function showSheetWrap(){ $("#sheetWrap").hidden = false; pushUiState(); }
 window.addEventListener("popstate", () => {
-  if(!$("#zoomWrap").hidden){ $("#zoomWrap").hidden = true; return; }
   if(!$("#scanOverlay").hidden) closeScan();
   else if(!$("#sheetWrap").hidden) closeSheet();
 });
@@ -985,9 +966,9 @@ function bindCoverInput(){
   $("#coverFile").addEventListener("change", async e => {
     const f = e.target.files[0]; if(!f) return;
     try{
-      const url = await compressImage(f, 720);
+      const url = await compressImage(f, 360);
       $("#fCover").value = url;
-      $("#coverPreview").innerHTML = `<img class="cover zoomable" src="${url}" alt="">`;
+      $("#coverPreview").innerHTML = `<img class="cover" src="${url}" alt="">`;
     }catch(err){ toast("照片讀取失敗"); }
   });
 }
@@ -1069,7 +1050,7 @@ async function runLookup(isbn){
     if(!$("#fTitle").value) $("#fTitle").value = info.title;
     if(!$("#fAuthor").value) $("#fAuthor").value = info.author;
     if(!$("#fPub").value) $("#fPub").value = info.publisher;
-    if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }).replace('class="cover"', 'class="cover zoomable"'); }
+    if(info.cover && !$("#fCover").value){ $("#fCover").value = info.cover; $("#coverPreview").innerHTML = coverHtml({ cover:info.cover, title:info.title }); }
     $("#lookupMsg").innerHTML = `<p class="mini">✓ 已從${info.source}帶入資料，請確認後儲存。</p>`;
     // 自動比對：書庫裡是否已有同一本書（還沒補 ISBN 的）
     const sim = similarBooks(info.title, true);
@@ -1421,7 +1402,6 @@ const actions = {
   scanReturn: () => startScan("return"),
   closeScan: () => closeScan(),
   closeSheet: () => closeSheet(),
-  closeZoom: () => { $("#zoomWrap").hidden = true; },
   cancelAndScan: () => { closeSheet(); startScan("normal"); },
   toggleScanBy: async el => {
     const id = el.dataset.id, toIsbn = !usesIsbn(id);
@@ -1500,7 +1480,11 @@ const actions = {
   saveEditBook: async el => {
     const f = readBookForm(), id = el.dataset.id;
     if(!f.title){ toast("請輸入書名"); return; }
-    await db.ref(DB_ROOT + "/books/" + id).update(f);
+    if(f.scanBy === "isbn" && !f.isbn){ toast("選「封面的 ISBN 條碼」要先填 ISBN，沒有 ISBN 請選「冊號標籤」", 3500); return; }
+    const changed = (state.books[id].scanBy === "isbn") !== (f.scanBy === "isbn");
+    const up = {}; Object.keys(f).forEach(k => up["books/" + id + "/" + k] = f[k]);
+    if(changed) copiesOf(id).forEach(c => up["copies/" + c.id + "/labelPrinted"] = f.scanBy === "isbn"); // 改借還方式時，同步標籤是否需要列印
+    await db.ref(DB_ROOT).update(up);
     toast("已儲存"); openSheet({ type:"book", id });
   },
   openStudentPrint: () => {
@@ -1846,8 +1830,6 @@ document.addEventListener("click", e => {
   }
   const lc = e.target.closest("#loanChips .chip");
   if(lc){ loanFilter = lc.dataset.filter; document.querySelectorAll("#loanChips .chip").forEach(c => c.classList.toggle("active", c === lc)); renderLoans(); return; }
-  const zi = e.target.closest("img.zoomable") || e.target.closest("#sheetBody img.cover");
-  if(zi){ openZoom(zi.getAttribute("src")); return; }
   const ps = e.target.closest("[data-pickscan]");
   if(ps){ $("#fScanBy").value = ps.dataset.pickscan; document.querySelectorAll("#scanByPick .chip").forEach(c => c.classList.toggle("active", c === ps)); return; }
   const pc = e.target.closest("[data-pickcat]");
@@ -1863,7 +1845,7 @@ document.addEventListener("click", e => {
   if(sc){ stuFilter = sc.dataset.filter; document.querySelectorAll("#stuChips .chip").forEach(c => c.classList.toggle("active", c === sc)); renderStudents(); return; }
   const a = e.target.closest("[data-act]");
   if(a && actions[a.dataset.act]){
-    if(!db && !["closeSheet","closeScan","closeZoom"].includes(a.dataset.act)){ toast("尚未連上資料庫"); return; }
+    if(!db && !["closeSheet","closeScan"].includes(a.dataset.act)){ toast("尚未連上資料庫"); return; }
     actions[a.dataset.act](a);
   }
 });
