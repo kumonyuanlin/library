@@ -534,8 +534,18 @@ function checkBorrow(p){
   return { problems, active:active.length, r };
 }
 function bookTitle(bookId, fallback){ const b = state.books[bookId]; return b ? b.title : (fallback || "（書籍已刪除）"); }
-function coverHtml(book, lg){
+/* 封面照片：
+   網路帶入的封面是網址（很短）→ 存在書籍資料的 cover 欄
+   手機拍的封面是整張圖片（很大）→ 另外存在 library/covers/{書籍id}，書籍資料只記 hasCover:true
+   畫面上捲到那本書時才下載封面，打開網站不用先下載所有照片 */
+const coverCache = {}, coverPending = {};
+let coverObserver = null;
+function coverHtml(book, lg, id){
   const cls = "cover" + (lg ? " lg" : "");
+  if(book && !book.cover && book.hasCover && id){
+    if(coverCache[id]) return `<img class="${cls}" src="${coverCache[id]}" alt="">`;
+    return `<div class="${cls}" data-cover="${esc(id)}">${firstChar(book.title)}</div>`;
+  }
   if(book && book.cover) return `<img class="${cls}" src="${esc(book.cover)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls}',textContent:'${firstChar(book.title)}'}))">`;
   return `<div class="${cls}">${firstChar(book && book.title)}</div>`;
 }
@@ -556,7 +566,7 @@ function init(){
     ref.on("child_added",   c => { state[k][c.key] = c.val(); scheduleRender(); }, denied);
     ref.on("child_changed", c => { state[k][c.key] = c.val(); scheduleRender(); });
     ref.on("child_removed", c => { delete state[k][c.key]; scheduleRender(); });
-    ref.once("value").then(() => { loaded[k] = true; if(k === "books") migrateCategories(); scheduleRender(); });
+    ref.once("value").then(() => { loaded[k] = true; if(loaded.books && loaded.copies && !loadMs) loadMs = Date.now() - loadT0; if(k === "books"){ migrateCategories(); migrateCovers(); } scheduleRender(); });
   });
   ["settings","studentCodes"].forEach(k => {
     db.ref(DB_ROOT + "/" + k).on("value", snap => {
@@ -600,9 +610,47 @@ function removedStudents(){
 function showSetup(msg){ const lb = document.getElementById("loadingBar"); if(lb) lb.hidden = true; const b = $("#setupBanner"); b.textContent = msg; b.hidden = false; }
 
 const loaded = { books:false, copies:false, loans:false };
+const loadT0 = Date.now(); let loadMs = 0;
 /* 多個節點的更新會分開觸發，集中到下一個時間點再一次重畫，避免畫到一半的資料 */
 let renderTimer = null;
-function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(renderAll, 30); }
+function scheduleRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderAll(); hydrateCovers(); }, 30); }
+function loadCover(id){
+  if(coverCache[id] !== undefined) return Promise.resolve(coverCache[id]);
+  if(!coverPending[id]) coverPending[id] = db.ref(DB_ROOT + "/covers/" + id).once("value").then(snap => { coverCache[id] = snap.val() || ""; return coverCache[id]; });
+  return coverPending[id];
+}
+function hydrateCovers(){
+  if(!db) return;
+  if(!coverObserver && "IntersectionObserver" in window){
+    coverObserver = new IntersectionObserver(entries => entries.forEach(en => {
+      if(!en.isIntersecting) return;
+      const el = en.target; coverObserver.unobserve(el);
+      const id = el.dataset.cover;
+      loadCover(id).then(src => {
+        if(!src) return;
+        document.querySelectorAll(`[data-cover="${CSS.escape(id)}"]`).forEach(x => {
+          const img = document.createElement("img"); img.className = x.className; img.src = src; img.alt = ""; x.replaceWith(img);
+        });
+      });
+    }), { rootMargin:"300px" });
+  }
+  document.querySelectorAll("[data-cover]:not([data-obs])").forEach(el => {
+    el.setAttribute("data-obs", "1");
+    if(coverObserver) coverObserver.observe(el);
+    else loadCover(el.dataset.cover).then(src => { if(src){ const img = document.createElement("img"); img.className = el.className; img.src = src; el.replaceWith(img); } });
+  });
+}
+/* 舊資料搬家：把存在書籍資料裡的拍照封面，搬到 covers（只需要做一次） */
+let coversMigrated = false;
+function migrateCovers(){
+  if(coversMigrated) return; coversMigrated = true;
+  const up = {}; let n = 0;
+  Object.keys(state.books).forEach(id => {
+    const c = state.books[id].cover;
+    if(c && c.indexOf("data:") === 0){ up["covers/" + id] = c; up["books/" + id + "/cover"] = ""; up["books/" + id + "/hasCover"] = true; coverCache[id] = c; n++; }
+  });
+  if(n) db.ref(DB_ROOT).update(up).then(() => toast(`已整理 ${n} 張封面照片，之後打開網站會變快`, 4000));
+}
 
 async function allocCopyIds(n){
   const res = await db.ref(DB_ROOT + "/settings/nextCopyNo").transaction(v => (v || 1) + n);
@@ -764,7 +812,7 @@ function renderBooks(){
   $("#bookList").innerHTML = ids.map(id => {
     const b = state.books[id], cps = copiesOf(id), inN = cps.filter(c => c.status !== "out").length;
     return `<button class="item" data-act="openBook" data-id="${esc(id)}">
-      ${coverHtml(b)}
+      ${coverHtml(b, false, id)}
       <div class="grow"><div class="title">${esc(b.title)}</div>
       <div class="meta">${b.category ? catDot(b.category) + esc(b.category) + "　" : ""}${esc(b.author || "")}</div></div>
       <span class="tag ${inN ? "in" : "out"}">在架 ${inN}/${cps.length}</span>
@@ -814,7 +862,7 @@ window.addEventListener("popstate", () => {
   if(!$("#scanOverlay").hidden) closeScan();
   else if(!$("#sheetWrap").hidden) closeSheet();
 });
-function setSheet(title, html){ $("#sheetTitle").textContent = title; $("#sheetBody").innerHTML = html; }
+function setSheet(title, html){ $("#sheetTitle").textContent = title; $("#sheetBody").innerHTML = html; hydrateCovers(); }
 
 function renderSheet(){
   if(!sheet) return;
@@ -839,7 +887,7 @@ function renderBookSheet(){
     return `<div class="item"><div class="grow"><span class="copy-no">${c.id}</span>${c.labelPrinted || usesIsbn(c.bookId) ? "" : `<small style="color:var(--out)">　標籤未印</small>`}${who}</div>${status}${btn}</div>`;
   }).join("");
   setSheet("書籍資料", `
-    <div class="book-head">${coverHtml(b, true)}
+    <div class="book-head">${coverHtml(b, true, sheet.id)}
       <div><h4>${esc(b.title)}</h4>
       <div class="meta">${esc(b.author || "作者未填")}<br>${esc(b.publisher || "")}<br>
       ${b.isbn ? "ISBN " + esc(b.isbn) : "無 ISBN"}${b.category ? "<br>" + catDot(b.category) + esc(b.category) : ""}</div></div>
@@ -868,7 +916,7 @@ function renderCopyReturnSheet(){
   const b = state.books[c.bookId], l = state.loans[c.loanId] || {};
   const st = l.dueDate ? loanStatus(l) : { cls:"out", text:"借出中" };
   setSheet("歸還", `
-    <div class="book-head">${coverHtml(b)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${sheet.id}</span></div></div></div>
+    <div class="book-head">${coverHtml(b, false, c.bookId)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${sheet.id}</span></div></div></div>
     <div class="status-card ${st.cls}"><b>${esc(l.borrowerName || "")}</b> 借閱中<br>
       借出 ${fmtTime(l.borrowedAt)}，到期 ${md(l.dueDate)}（${st.text}）</div>
     <button class="btn big ok" data-act="returnAndClose" data-copy="${sheet.id}">確認歸還</button>
@@ -911,7 +959,7 @@ function openBorrowForm(copyId){
   pick = null; pickType = "student";
   const c = state.copies[copyId], b = state.books[c.bookId];
   setSheet("借出", `
-    <div class="book-head">${coverHtml(b)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${copyId}</span>　<span class="tag in">在架</span></div></div></div>
+    <div class="book-head">${coverHtml(b, false, c.bookId)}<div><h4 style="font-size:18px">${esc(bookTitle(c.bookId))}</h4><div class="meta"><span class="copy-no">${copyId}</span>　<span class="tag in">在架</span></div></div></div>
     <button class="btn big" data-act="scanStudentPick" style="margin-bottom:10px">掃描學生條碼</button>
     <label class="f"><span>或搜尋借閱學生</span><input type="search" id="pickSearch" placeholder="輸入姓名或暱稱搜尋" autocomplete="off"></label>
     <div class="stu-results" id="pickResults"></div>
@@ -963,7 +1011,7 @@ function bookFormHtml(b, isNew){
     <div id="lookupMsg"></div>
     <div class="f-compact">
     <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:9px">
-      <div id="coverPreview">${coverHtml(b)}</div>
+      <div id="coverPreview">${coverHtml(b, false, sheet && sheet.id)}</div>
       <label class="f" style="flex:1;min-width:0;margin:0"><span>ISBN（輸入後按「查詢」）</span>
         <div style="display:flex;gap:6px"><input type="text" id="fIsbn" value="${esc(b.isbn || "")}" inputmode="numeric" placeholder="978 開頭 13 碼" style="flex:1;min-width:0">
         <button type="button" class="btn primary" data-act="isbnLookup">查詢</button></div></label>
@@ -971,7 +1019,7 @@ function bookFormHtml(b, isNew){
     <div style="display:flex;gap:8px;margin-bottom:10px"><label class="btn sm" for="coverFile">拍封面</label>
       <input type="file" id="coverFile" accept="image/*" capture="environment" hidden>
       ${b.cover ? `<button type="button" class="btn sm" data-act="clearCover">移除封面</button>` : ""}</div>
-    <input type="hidden" id="fCover" value="${esc(b.cover || "")}">
+    <input type="hidden" id="fCover" value="${esc(b.cover || (b.hasCover ? "keep" : ""))}">
     <label class="f"><span>書名（必填）</span><input type="text" id="fTitle" value="${esc(b.title || "")}"></label>
     <label class="f"><span>作者</span><input type="text" id="fAuthor" value="${esc(b.author || "")}"></label>
     <label class="f"><span>出版社</span><input type="text" id="fPub" value="${esc(b.publisher || "")}"></label>
@@ -1019,6 +1067,15 @@ function compressImage(file, maxW){
     img.onerror = rej;
     img.src = URL.createObjectURL(file);
   });
+}
+/* 把表單的封面值轉成要寫入資料庫的內容 */
+function coverUpdates(bookId, cover, up){
+  if(cover === "keep") return;                       // 沒有更動
+  if(cover && cover.indexOf("data:") === 0){         // 新拍的照片
+    up["covers/" + bookId] = cover; up["books/" + bookId + "/cover"] = ""; up["books/" + bookId + "/hasCover"] = true; coverCache[bookId] = cover;
+  } else {                                           // 網址或移除
+    up["books/" + bookId + "/cover"] = cover || ""; up["books/" + bookId + "/hasCover"] = false; up["covers/" + bookId] = null; delete coverCache[bookId];
+  }
 }
 function readBookForm(){
   return {
@@ -1519,7 +1576,12 @@ const actions = {
       const bookId = (f.isbn && !state.books[f.isbn]) ? f.isbn : ("N" + Date.now().toString(36).toUpperCase());
       const ids = await allocCopyIds(n);
       const up = {}; const now = Date.now();
-      up["books/" + bookId] = Object.assign(f, { createdAt:now });
+      const cov = f.cover; delete f.cover;
+      up["books/" + bookId] = Object.assign(f, { createdAt:now, cover:"" });
+      if(cov && cov !== "keep"){
+        if(cov.indexOf("data:") === 0){ up["covers/" + bookId] = cov; up["books/" + bookId].hasCover = true; coverCache[bookId] = cov; }
+        else up["books/" + bookId].cover = cov;
+      }
       ids.forEach(id => up["copies/" + id] = { bookId, status:"in", createdAt:now, labelPrinted:f.scanBy === "isbn" });
       await db.ref(DB_ROOT).update(up);
       toast(f.scanBy === "isbn" ? "已建立，借還直接掃封面的 ISBN 條碼，不用貼標籤" : "已建立冊號 " + ids.join("、") + "，記得列印標籤", 3500);
@@ -1536,7 +1598,8 @@ const actions = {
     if(!f.title){ toast("請輸入書名"); return; }
     if(f.scanBy === "isbn" && !f.isbn){ toast("選「封面的 ISBN 條碼」要先填 ISBN，沒有 ISBN 請選「冊號標籤」", 3500); return; }
     const changed = (state.books[id].scanBy === "isbn") !== (f.scanBy === "isbn");
-    const up = {}; Object.keys(f).forEach(k => up["books/" + id + "/" + k] = f[k]);
+    const up = {}; Object.keys(f).forEach(k => { if(k !== "cover") up["books/" + id + "/" + k] = f[k]; });
+    coverUpdates(id, f.cover, up);
     if(changed) copiesOf(id).forEach(c => up["copies/" + c.id + "/labelPrinted"] = f.scanBy === "isbn"); // 改借還方式時，同步標籤是否需要列印
     await db.ref(DB_ROOT).update(up);
     toast("已儲存"); openSheet({ type:"book", id });
@@ -1687,7 +1750,7 @@ const actions = {
     const up = { isbn };
     const info = sheet && sheet.lookup;
     if(info){
-      if(!b.cover && info.cover) up.cover = info.cover;
+      if(!b.cover && !b.hasCover && info.cover) up.cover = info.cover;
       if(!b.author && info.author) up.author = info.author;
       if(!b.publisher && info.publisher) up.publisher = info.publisher;
       if(!b.year && info.year) up.year = info.year;
@@ -1729,7 +1792,7 @@ const actions = {
     const id = el.dataset.id, cps = copiesOf(id);
     if(cps.some(c => c.status === "out")){ toast("還有冊借出中，全部歸還後才能刪除"); return; }
     if(!await askConfirm(`刪除「${bookTitle(id)}」和它的 ${cps.length} 冊？借閱歷史會保留書名。`)) return;
-    const up = {}; up["books/" + id] = null; cps.forEach(c => up["copies/" + c.id] = null);
+    const up = {}; up["books/" + id] = null; up["covers/" + id] = null; cps.forEach(c => up["copies/" + c.id] = null);
     await db.ref(DB_ROOT).update(up);
     toast("已刪除"); closeSheet();
   },
@@ -1810,6 +1873,9 @@ const actions = {
       <div id="importMsg"></div>
       <h2 class="sec">分類名稱</h2>
       <div class="list">${catRows() || `<div class="empty">還沒有分類</div>`}</div>
+      <h2 class="sec">載入速度</h2>
+      <p style="font-size:14px;margin:0 0 6px">這次打開網站花了 <b>${loadMs ? (loadMs / 1000).toFixed(1) + " 秒" : "（還在載入）"}</b> 載入書庫。</p>
+      <p style="font-size:14px;color:var(--muted);margin:0">書籍資料 ${(JSON.stringify(state.books).length / 1024).toFixed(0)} KB、冊 ${(JSON.stringify(state.copies).length / 1024).toFixed(0)} KB、借閱紀錄 ${(JSON.stringify(state.loans).length / 1024).toFixed(0)} KB（封面照片另外存放，不會拖慢開啟速度）</p>
       <h2 class="sec">資料備份</h2>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">下載所有書籍、冊號與借閱紀錄（JSON 檔），建議每學期備份一次。</p>
       <button class="btn" data-act="exportJson">下載備份</button>
@@ -1866,8 +1932,10 @@ const actions = {
       parentDays:num("#pDays", 28, 120), parentLimit:num("#pLimit", 1, 20), banFrom:$("#sBan").value });
     toast("已儲存"); closeSheet();
   },
-  exportJson: () => {
-    const data = { exportedAt:new Date().toISOString(), books:state.books, copies:state.copies, loans:state.loans, settings:state.settings };
+  exportJson: async () => {
+    toast("準備備份資料中…");
+    const covers = (await db.ref(DB_ROOT + "/covers").once("value")).val() || {};
+    const data = { exportedAt:new Date().toISOString(), books:state.books, copies:state.copies, loans:state.loans, covers, settings:state.settings };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type:"application/json" }));
     a.download = "教室圖書備份_" + ymd() + ".json"; a.click();
