@@ -286,6 +286,7 @@ details.notice summary{cursor:pointer;font-weight:700}
       <button class="btn" data-act="openPrint" id="printPendingBtn">列印標籤</button>
     </div>
     <div class="chips" id="bookCats"></div>
+    <div class="chips" id="bookScanChips"></div>
     <div class="chips" id="bookLevels" hidden></div>
     <div class="list" id="bookList"></div>
   </section>
@@ -368,7 +369,7 @@ let db = null;
 const state = { studentCodes:{}, reportStudents:{}, extraStudents:{}, hiddenStudents:{}, books:{}, copies:{}, loans:{}, settings:{ loanDays:14, studentLimit:2, parentDays:28, parentLimit:1, banFrom:"due" }, students:{} };
 let currentTab = "home";
 let sheet = null;          // {type, id, ...}
-let bookLimit = 120;
+let bookLimit = 120, bookScan = "all";
 let loanFilter = "all", stuFilter = "borrowing", bookCat = "all", bookLevel = "all";
 const CAT_ORDER = ["幼兒繪本", "低年級", "中年級", "高年級", "教材推薦書", "科普", "英文書", "家長"];
 const CAT_COLOR = { "幼兒繪本":"#E53935", "低年級":"#2B9BD8", "中年級":"#E8BC00", "高年級":"#1E9B4F", "教材推薦書":"#A9A9A9", "科普":"#7B6CC0", "英文書":"#D4B26A", "家長":"#7B4A2E" };
@@ -731,6 +732,12 @@ function renderBooks(){
   $("#bookCats").innerHTML = `<button class="chip ${bookCat === "all" ? "active" : ""}" data-bcat="all">全部（${ids.length}）</button>`
     + cats.map(c => `<button class="chip ${bookCat === c ? "active" : ""}" data-bcat="${esc(c)}">${catDot(c)}${esc(c)}（${cnt[c]}）</button>`).join("");
   if(bookCat !== "all") ids = ids.filter(id => (state.books[id].category || "未分類") === bookCat);
+  // 借還方式：ISBN 條碼／冊號標籤（數字為目前分類內的種數）
+  const nIsbn = ids.filter(usesIsbn).length, nLabel = ids.length - nIsbn;
+  $("#bookScanChips").innerHTML = [["all", "全部方式", ids.length], ["isbn", "ISBN 條碼", nIsbn], ["label", "冊號標籤", nLabel]]
+    .map(([k, t, n]) => `<button class="chip ${bookScan === k ? "active" : ""}" data-bscan="${k}">${t}（${n}）</button>`).join("");
+  if(bookScan === "isbn") ids = ids.filter(usesIsbn);
+  else if(bookScan === "label") ids = ids.filter(id => !usesIsbn(id));
   // 閱讀等級按鈕（該分類有等級資料時才顯示）
   const lv = {};
   ids.forEach(id => { const l = state.books[id].level; if(l) lv[l] = (lv[l] || 0) + 1; });
@@ -1887,6 +1894,8 @@ document.addEventListener("click", e => {
     $("#pickDue").value = addDays(ruleOf(pickType).days); renderPickResults(); return; }
   const bc = e.target.closest("[data-bcat]");
   if(bc){ bookCat = bc.dataset.bcat; bookLevel = "all"; bookLimit = 120; renderBooks(); return; }
+  const bs = e.target.closest("[data-bscan]");
+  if(bs){ bookScan = bs.dataset.bscan; bookLimit = 120; renderBooks(); return; }
   const bl = e.target.closest("[data-blv]");
   if(bl){ bookLevel = bl.dataset.blv; renderBooks(); return; }
   const sc = e.target.closest("#stuChips .chip");
