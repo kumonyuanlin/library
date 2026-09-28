@@ -280,7 +280,8 @@ details.notice summary{cursor:pointer;font-weight:700}
       </select>
     </div>
     <div class="toolbar">
-      <button class="btn primary" data-act="scan">掃描新增</button>
+      <button class="btn primary" data-act="scanLookup">掃描查詢</button>
+      <button class="btn" data-act="scan">掃描新增</button>
       <button class="btn" data-act="manualBook">手動新增</button>
       <button class="btn" data-act="openPrint" id="printPendingBtn">列印標籤</button>
     </div>
@@ -1101,7 +1102,8 @@ async function startScan(mode){
   const T = { return:["連續還書", "逐本掃描冊號標籤，掃到就自動歸還", "準備好了，請掃第一本"],
     borrowFor:["幫 " + who + " 借書", "逐本掃描書上的冊號標籤，掃到就借出", ""],
     pickStudent:["掃描學生條碼", "對準學生借書證上的 " + STUDENT_PREFIX + " 開頭條碼", ""],
-    normal:["掃描", "掃學生條碼借書，或掃書上的冊號／ISBN", ""] }[mode] || ["掃描", "", ""];
+    normal:["掃描", "掃學生條碼借書，或掃書上的冊號／ISBN", ""],
+    lookup:["掃描查詢", "掃冊號標籤或 ISBN 條碼，直接顯示書籍資料（不會借出或歸還）", ""] }[mode] || ["掃描", "", ""];
   $("#scanTitle").textContent = T[0]; $("#scanHint").textContent = T[1];
   const msg = $("#scanMsg"); msg.className = "";
   if(mode === "borrowFor"){
@@ -1284,6 +1286,21 @@ async function onScan(text){
       }
     }
     scanBusy = false; return;
+  }
+  if(scanMode === "lookup"){
+    const code = text.trim().toUpperCase(), msg = $("#scanMsg");
+    let bid = state.copies[code] ? state.copies[code].bookId : null;
+    if(!bid){ const isbn = normalizeIsbn(code); if(isbn) bid = findBookByIsbn(isbn); }
+    if(!bid){
+      const sid = sidByCode(code);
+      if(sid){ await closeScan(); openSheet({ type:"student", key:"s:" + sid }); return; }
+      msg.hidden = false; msg.className = "warn";
+      msg.textContent = normalizeIsbn(code) ? "書庫裡沒有這本書（可以到「掃描新增」建檔）" : "查不到這個條碼：" + code;
+      return;
+    }
+    await closeScan();
+    openSheet({ type:"book", id:bid });
+    return;
   }
   if(scanMode === "pickStudent"){
     const sid = sidByCode(text.trim().toUpperCase());
@@ -1620,6 +1637,7 @@ const actions = {
     closeSheet(); startScan("borrowFor");
   },
   scanStudentPick: () => startScan("pickStudent"),
+  scanLookup: () => startScan("lookup"),
   addStudents: () => {
     sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
     setSheet("新增學生", `
