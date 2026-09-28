@@ -641,15 +641,31 @@ function hydrateCovers(){
   });
 }
 /* 舊資料搬家：把存在書籍資料裡的拍照封面，搬到 covers（只需要做一次） */
-let coversMigrated = false;
-function migrateCovers(){
+/* 分批搬：每次 5 張，搬完一批就從記憶體釋放，避免手機記憶體不足而當掉 */
+let coversMigrated = false, migrating = false;
+async function migrateCovers(){
   if(coversMigrated) return; coversMigrated = true;
-  const up = {}; let n = 0;
-  Object.keys(state.books).forEach(id => {
-    const c = state.books[id].cover;
-    if(c && c.indexOf("data:") === 0){ up["covers/" + id] = c; up["books/" + id + "/cover"] = ""; up["books/" + id + "/hasCover"] = true; coverCache[id] = c; n++; }
-  });
-  if(n) db.ref(DB_ROOT).update(up).then(() => toast(`已整理 ${n} 張封面照片，之後打開網站會變快`, 4000));
+  const ids = Object.keys(state.books).filter(id => { const c = state.books[id].cover; return c && c.indexOf("data:") === 0; });
+  if(!ids.length) return;
+  migrating = true;
+  const bar = $("#loadingBar");
+  try{
+    for(let i = 0; i < ids.length; i += 5){
+      const up = {};
+      ids.slice(i, i + 5).forEach(id => {
+        up["covers/" + id] = state.books[id].cover;
+        up["books/" + id + "/cover"] = ""; up["books/" + id + "/hasCover"] = true;
+      });
+      await db.ref(DB_ROOT).update(up);
+      ids.slice(i, i + 5).forEach(id => { state.books[id].cover = ""; state.books[id].hasCover = true; });
+      bar.hidden = false;
+      bar.textContent = `正在整理封面照片 ${Math.min(i + 5, ids.length)} / ${ids.length}（只需要做一次，請不要關閉網頁）`;
+      await new Promise(r => setTimeout(r, 80));
+    }
+    toast(`已整理 ${ids.length} 張封面照片，之後打開網站會變快`, 4000);
+  }catch(e){ toast("封面整理中斷，下次打開會繼續：" + e.message, 4000); }
+  migrating = false; bar.hidden = true;
+  bar.textContent = "正在從雲端載入書庫資料…（網路慢時需要幾秒，資料不會不見）";
 }
 
 async function allocCopyIds(n){
@@ -686,7 +702,7 @@ async function returnCopy(copyId){
 /* ========== 畫面 ========== */
 function renderAll(){
   const ready = loaded.books && loaded.copies;
-  $("#loadingBar").hidden = ready;
+  if(!migrating) $("#loadingBar").hidden = ready;
   if(currentTab === "home") renderHome();
   else if(currentTab === "loans") renderLoans();
   else if(currentTab === "books") renderBooks();
