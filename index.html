@@ -283,7 +283,6 @@ details.notice summary{cursor:pointer;font-weight:700}
       <button class="btn primary" data-act="scanLookup">掃描查詢</button>
       <button class="btn" data-act="scan">掃描新增</button>
       <button class="btn" data-act="manualBook">手動新增</button>
-      <button class="btn" data-act="openPrint" id="printPendingBtn">列印標籤</button>
     </div>
     <div class="chips" id="bookCats"></div>
     <div class="chips" id="bookScanChips"></div>
@@ -782,8 +781,7 @@ function sortBookIds(ids, mode){
 }
 function renderBooks(){
   const q = $("#bookSearch").value.trim().toLowerCase();
-  const pending = Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted).length;
-  const pb = $("#printPendingBtn"); pb.textContent = pending ? "列印標籤（未印 " + pending + "）" : "列印標籤";
+
   let ids = Object.keys(state.books);
   // 年級分類按鈕
   const cnt = {};
@@ -916,7 +914,7 @@ function renderBookSheet(){
     <div class="list">${rows || `<div class="empty">還沒有任何一冊，請按下方「增加冊數」。</div>`}</div>
     <div class="toolbar" style="margin-top:14px">
       <button class="btn" data-act="addCopies" data-id="${esc(sheet.id)}">增加冊數</button>
-      <button class="btn" data-act="printBook" data-id="${esc(sheet.id)}">列印這本的標籤</button>
+      ${usesIsbn(sheet.id) ? "" : `<button class="btn" data-act="printBook" data-id="${esc(sheet.id)}">列印這本的標籤</button>`}
       <button class="btn" data-act="editBook" data-id="${esc(sheet.id)}">編輯資料</button>
     </div>
     <div class="toolbar">
@@ -1812,7 +1810,7 @@ const actions = {
     await db.ref(DB_ROOT).update(up);
     toast("已刪除"); closeSheet();
   },
-  printBook: el => printLabels(copiesOf(el.dataset.id).map(c => c.id)),
+  printBook: el => { if(usesIsbn(el.dataset.id)){ toast("這本書用封面 ISBN 條碼借還，不需要印標籤"); return; } printLabels(copiesOf(el.dataset.id).map(c => c.id)); },
   openPrint: () => {
     sheet = { type:"form" }; showSheetWrap(); document.body.style.overflow = "hidden";
     const all = Object.keys(state.copies).filter(id => !usesIsbn(state.copies[id].bookId)), pend = all.filter(id => !state.copies[id].labelPrinted);
@@ -1837,7 +1835,7 @@ const actions = {
     const from = $("#pFrom").value.trim().toUpperCase(), to = $("#pTo").value.trim().toUpperCase();
     let ids;
     if(from || to){
-      ids = all.filter(id => (!from || id >= from) && (!to || id <= to));
+      ids = all.filter(id => (!from || id >= from) && (!to || id <= to) && !usesIsbn(state.copies[id].bookId));
     } else {
       const r = $("#pRange").value;
       const need = id => !usesIsbn(state.copies[id].bookId); // 用 ISBN 借還的書不用印標籤
@@ -1895,6 +1893,9 @@ const actions = {
       <h2 class="sec">資料備份</h2>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">下載所有書籍、冊號與借閱紀錄（JSON 檔），建議每學期備份一次。</p>
       <button class="btn" data-act="exportJson">下載備份</button>
+      <h2 class="sec">冊號標籤</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 8px">只有「封面沒有 ISBN 條碼」（借還方式為冊號標籤）的書需要印標籤；用 ISBN 條碼借還的書不會列入。</p>
+      <button class="btn primary" data-act="openPrint">列印冊號標籤（未印 ${Object.keys(state.copies).filter(id => !state.copies[id].labelPrinted && !usesIsbn(state.copies[id].bookId)).length} 張）</button>
       <h2 class="sec">標籤規格</h2>
       <select id="sLabel" style="margin-bottom:8px">${Object.keys(LABEL_FORMATS).map(k => `<option value="${k}" ${labelFormat() === LABEL_FORMATS[k] ? "selected" : ""}>${LABEL_FORMATS[k].name}</option>`).join("")}</select>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選好後按下方「儲存標籤規格」。列印時請選「實際大小／100%」、邊界「無」，並取消「頁首和頁尾」。</p>
