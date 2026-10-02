@@ -1900,7 +1900,35 @@ const actions = {
       <select id="sLabel" style="margin-bottom:8px">${Object.keys(LABEL_FORMATS).map(k => `<option value="${k}" ${labelFormat() === LABEL_FORMATS[k] ? "selected" : ""}>${LABEL_FORMATS[k].name}</option>`).join("")}</select>
       <p style="font-size:14px;color:var(--muted);margin:0 0 10px">選好後按下方「儲存標籤規格」。列印時請選「實際大小／100%」、邊界「無」，並取消「頁首和頁尾」。</p>
       <button class="btn" data-act="saveLabelFmt">儲存標籤規格</button>
-      <button class="btn" data-act="resetLabels" style="margin-left:6px">全部改回未印</button>`);
+      <button class="btn" data-act="resetLabels" style="margin-left:6px">全部改回未印</button>
+      <h2 class="sec">冊號重新編號</h2>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 10px">依分類順序（${CAT_ORDER.join("／")}）、同分類再依書名筆畫，從 ${COPY_PREFIX}0001 重新編號。之後新增的書會接在最後面，需要時可以再按一次。</p>
+      <button class="btn danger" data-act="renumberCopies">依分類重新編號冊號</button>`);
+  },
+  renumberCopies: async () => {
+    const all = Object.keys(state.copies);
+    if(!all.length){ toast("還沒有任何冊"); return; }
+    const catOf = id => { const b = state.books[state.copies[id].bookId]; return (b && b.category) || "未分類"; };
+    const catRank = c => { const i = CAT_ORDER.indexOf(c); return i >= 0 ? i : (c === "未分類" ? 999 : 500); };
+    const col = collator("stroke");
+    const title = id => sortKey(bookTitle(state.copies[id].bookId));
+    // 分類順序 → 書名筆畫 → 同一本書的多冊維持原本冊號先後
+    all.sort((a, b) => catRank(catOf(a)) - catRank(catOf(b)) || catOf(a).localeCompare(catOf(b), "zh-Hant")
+      || col.compare(title(a), title(b)) || state.copies[a].bookId.localeCompare(state.copies[b].bookId) || a.localeCompare(b));
+    const nLabel = all.filter(id => !usesIsbn(state.copies[id].bookId)).length;
+    if(!await askConfirm(`把 ${all.length} 冊依分類、書名重新編號為 ${COPY_PREFIX}0001～${COPY_PREFIX}${String(all.length).padStart(4, "0")}？\n\n已貼上的冊號標籤會全部失效，用冊號標籤借還的 ${nLabel} 冊要重新列印標籤（用 ISBN 借還的書不受影響）。建議先到上方「下載備份」。`, "重新編號")) return;
+    const map = {}, copies = {};
+    all.forEach((id, i) => {
+      const nid = COPY_PREFIX + String(i + 1).padStart(4, "0"); map[id] = nid;
+      const c = Object.assign({}, state.copies[id]);
+      if(!usesIsbn(c.bookId)) c.labelPrinted = false; // 編號變了，舊標籤要重印
+      copies[nid] = c;
+    });
+    // 整個替換 copies，借閱紀錄裡的冊號一起改成新號
+    const up = { copies, "settings/nextCopyNo":all.length + 1 };
+    Object.keys(state.loans).forEach(lid => { const o = state.loans[lid].copyId; if(map[o] && map[o] !== o) up["loans/" + lid + "/copyId"] = map[o]; });
+    await db.ref(DB_ROOT).update(up);
+    toast(`已重新編號：${COPY_PREFIX}0001～${COPY_PREFIX}${String(all.length).padStart(4, "0")}，請重新列印冊號標籤`, 4500);
   },
   doImport: async el => {
     const list = pendingImport; if(!list) return;
