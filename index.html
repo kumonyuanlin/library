@@ -230,6 +230,8 @@ details.notice summary{cursor:pointer;font-weight:700}
   #adminLogin .row button{flex:1;padding:10px;font:inherit;font-size:15px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff}
   #adminLogin .row button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
   #adminMsg{min-height:18px;font-size:13px;color:var(--late);margin-top:8px}
+  #adminMsg.ok{color:var(--ok)}
+  #adminForgot{display:inline-block;margin-top:10px;font-size:13px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -254,6 +256,7 @@ details.notice summary{cursor:pointer;font-weight:700}
       <button type="submit" class="primary" id="adminSubmit">登入</button>
     </div>
     <div id="adminMsg"></div>
+    <a id="adminForgot" href="#">忘記密碼？</a>
   </form>
 </div>
 <div id="loadingBar">正在從雲端載入書庫資料…（網路慢時需要幾秒，資料不會不見）</div>
@@ -2082,7 +2085,7 @@ const ADMIN_ERR = {
   "auth/too-many-requests":"嘗試次數太多，請稍後再試", "auth/network-request-failed":"網路連線失敗，請檢查網路"
 };
 function openAdminLogin(){
-  $("#adminMsg").textContent = "";
+  $("#adminMsg").textContent = ""; $("#adminMsg").className = "";
   $("#adminLogin").hidden = false;
   setTimeout(() => $("#adminEmail").focus(), 50);
 }
@@ -2102,6 +2105,15 @@ $("#adminForm").addEventListener("submit", e => {
     .then(() => { closeAdminLogin(); toast("老師已登入"); })
     .catch(err => { $("#adminMsg").textContent = ADMIN_ERR[err.code] || ("登入失敗：" + err.message); })
     .finally(() => { btn.disabled = false; btn.textContent = "登入"; });
+});
+$("#adminForgot").addEventListener("click", e => {
+  e.preventDefault();
+  const email = $("#adminEmail").value.trim(), msg = $("#adminMsg");
+  msg.className = "";
+  if(!email){ msg.textContent = "請先在上方輸入 Email，再按「忘記密碼」"; $("#adminEmail").focus(); return; }
+  firebase.auth().sendPasswordResetEmail(email)
+    .then(() => { msg.className = "ok"; msg.textContent = "已寄出重設密碼信，請到信箱收信（沒看到請檢查垃圾郵件）"; })
+    .catch(err => { msg.textContent = ADMIN_ERR[err.code] || ("寄送失敗：" + err.message); });
 });
 // 沒登入時如果還是碰到需要權限的寫入(例如登入過期)，給中文提示並請老師登入
 window.addEventListener("unhandledrejection", e => {
