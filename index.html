@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/iife/reader/index.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
@@ -214,6 +215,21 @@ details.notice summary{cursor:pointer;font-weight:700}
   .idx-row .dots{flex:1;border-bottom:0.2mm dotted #888;margin:0 1.5mm;transform:translateY(-1mm)}
   .idx-row .pg{font-weight:700}
 }
+  /* 老師登入（管理功能才需要） */
+  .admin-btn{border:1px solid rgba(255,255,255,.45);background:transparent;color:inherit;border-radius:999px;
+    padding:4px 12px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+  .admin-btn.on{background:rgba(255,255,255,.18)}
+  #adminLogin{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+  #adminLogin[hidden]{display:none}
+  #adminLogin form{width:100%;max-width:360px;background:#fff;color:var(--ink);border-radius:14px;padding:22px 20px}
+  #adminLogin h3{margin:0 0 4px;font-size:18px}
+  #adminLogin p{margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.5}
+  #adminLogin label{display:block;font-size:13px;color:var(--muted);margin-bottom:10px}
+  #adminLogin input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px;font-size:16px;border:1px solid var(--line);border-radius:8px}
+  #adminLogin .row{display:flex;gap:8px;margin-top:6px}
+  #adminLogin .row button{flex:1;padding:10px;font:inherit;font-size:15px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff}
+  #adminLogin .row button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+  #adminMsg{min-height:18px;font-size:13px;color:var(--late);margin-top:8px}
 </style>
 </head>
 <body>
@@ -221,11 +237,25 @@ details.notice summary{cursor:pointer;font-weight:700}
 <header class="top">
   <h1>教室圖書借閱<span class="sub">KUMON 員林大同正興教室</span></h1>
   <span class="conn" id="conn" title="連線狀態"></span>
+  <button class="admin-btn" id="adminBtn" type="button">老師登入</button>
   <button class="icon-btn" data-act="openSettings" aria-label="設定">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
   </button>
 </header>
 <div id="setupBanner" hidden></div>
+<div id="adminLogin" hidden>
+  <form id="adminForm">
+    <h3>老師登入</h3>
+    <p>新增、修改、刪除書籍與學生、列印標籤、系統設定需要登入。<br>借書、還書、查詢不用登入。</p>
+    <label>Email<input type="email" id="adminEmail" autocomplete="username" required></label>
+    <label>密碼<input type="password" id="adminPw" autocomplete="current-password" required></label>
+    <div class="row">
+      <button type="button" id="adminCancel">取消</button>
+      <button type="submit" class="primary" id="adminSubmit">登入</button>
+    </div>
+    <div id="adminMsg"></div>
+  </form>
+</div>
 <div id="loadingBar">正在從雲端載入書庫資料…（網路慢時需要幾秒，資料不會不見）</div>
 
 <main>
@@ -556,6 +586,14 @@ function init(){
   if(!cfg.apiKey || cfg.apiKey.indexOf("請") === 0) delete cfg.apiKey;
   try{ firebase.initializeApp(cfg); db = firebase.database(); }
   catch(e){ showSetup("Firebase 設定有誤：" + e.message); return; }
+  firebase.auth().onAuthStateChanged(u => {
+    adminUser = u;
+    const b = $("#adminBtn");
+    b.textContent = u ? "老師已登入" : "老師登入";
+    b.classList.toggle("on", !!u);
+    if(u && loaded.books){ migrateCategories(); migrateCovers(); }
+    if(u && pendingAdminAct){ const a = pendingAdminAct; pendingAdminAct = null; if(document.body.contains(a)) actions[a.dataset.act](a); }
+  });
 
   db.ref(".info/connected").on("value", s => $("#conn").classList.toggle("on", !!s.val()));
   const denied = err => showSetup("無法讀取圖書資料（" + err.code + "）。請到 Firebase 主控台的 Realtime Database 規則，允許讀寫 library 路徑。");
@@ -580,6 +618,7 @@ function init(){
 }
 let catMigrated = false;
 function migrateCategories(){
+  if(!isAdmin()) return;
   if(catMigrated) return; catMigrated = true;
   const up = {};
   Object.keys(state.books).forEach(id => { const n = CAT_RENAME[state.books[id].category]; if(n) up["books/" + id + "/category"] = n; });
@@ -643,6 +682,7 @@ function hydrateCovers(){
 /* 分批搬：每次 5 張，搬完一批就從記憶體釋放，避免手機記憶體不足而當掉 */
 let coversMigrated = false, migrating = false;
 async function migrateCovers(){
+  if(!isAdmin()) return;
   if(coversMigrated) return; coversMigrated = true;
   const ids = Object.keys(state.books).filter(id => { const c = state.books[id].cover; return c && c.indexOf("data:") === 0; });
   if(!ids.length) return;
@@ -2016,6 +2056,7 @@ document.addEventListener("click", e => {
   const a = e.target.closest("[data-act]");
   if(a && actions[a.dataset.act]){
     if(!db && !["closeSheet","closeScan"].includes(a.dataset.act)){ toast("尚未連上資料庫"); return; }
+    if(!isAdmin() && !PUBLIC_ACTS.has(a.dataset.act)){ pendingAdminAct = a; openAdminLogin(); return; }
     actions[a.dataset.act](a);
   }
 });
@@ -2025,6 +2066,52 @@ $("#bookSearch").addEventListener("input", () => { bookLimit = 120; renderBooks(
 $("#bookSort").addEventListener("change", renderBooks);
 $("#stuSearchTab").addEventListener("input", renderStudents);
 document.addEventListener("keydown", e => { if(e.key === "Escape"){ if(!$("#scanOverlay").hidden) closeScan(); else closeSheet(); } });
+
+/* ---------------- 老師登入 ----------------
+   借書、還書、查詢不用登入；其餘會改到書庫／學生／設定的功能要老師登入。
+   資料庫規則也同步限制：沒登入只能寫入借閱紀錄(loans)和冊的借出狀態(copies 底下每一冊的 status、loanId)。 */
+const PUBLIC_ACTS = new Set(["scan","scanReturn","closeScan","closeSheet","moreBooks","cancelAndScan","isbnLookup","torch",
+  "openBook","openStudent","borrowForm","return","returnAndClose","pickStu","pickOther","doBorrow",
+  "borrowForStart","scanStudentPick","scanLookup","copyLateList","openSettings","exportJson"]);
+let adminUser = null, pendingAdminAct = null;
+function isAdmin(){ return !!adminUser; }
+const ADMIN_ERR = {
+  "auth/invalid-email":"Email 格式不正確", "auth/user-disabled":"這個帳號已被停用",
+  "auth/user-not-found":"Email 或密碼錯誤", "auth/wrong-password":"Email 或密碼錯誤",
+  "auth/invalid-credential":"Email 或密碼錯誤", "auth/invalid-login-credentials":"Email 或密碼錯誤",
+  "auth/too-many-requests":"嘗試次數太多，請稍後再試", "auth/network-request-failed":"網路連線失敗，請檢查網路"
+};
+function openAdminLogin(){
+  $("#adminMsg").textContent = "";
+  $("#adminLogin").hidden = false;
+  setTimeout(() => $("#adminEmail").focus(), 50);
+}
+function closeAdminLogin(){ $("#adminLogin").hidden = true; $("#adminPw").value = ""; }
+$("#adminBtn").addEventListener("click", () => {
+  if(!window.firebase || !firebase.apps.length) return;
+  if(isAdmin()){
+    if(confirm(`目前登入：${adminUser.email}
+要登出嗎？登出後仍可借書、還書、查詢。`)) firebase.auth().signOut().then(() => toast("已登出"));
+  }else{ pendingAdminAct = null; openAdminLogin(); }
+});
+$("#adminCancel").addEventListener("click", () => { pendingAdminAct = null; closeAdminLogin(); });
+$("#adminForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const btn = $("#adminSubmit"); btn.disabled = true; btn.textContent = "登入中…";
+  firebase.auth().signInWithEmailAndPassword($("#adminEmail").value.trim(), $("#adminPw").value)
+    .then(() => { closeAdminLogin(); toast("老師已登入"); })
+    .catch(err => { $("#adminMsg").textContent = ADMIN_ERR[err.code] || ("登入失敗：" + err.message); })
+    .finally(() => { btn.disabled = false; btn.textContent = "登入"; });
+});
+// 沒登入時如果還是碰到需要權限的寫入(例如登入過期)，給中文提示並請老師登入
+window.addEventListener("unhandledrejection", e => {
+  const r = e.reason || {};
+  if(/permission[_ ]denied/i.test((r.code || "") + " " + (r.message || ""))){
+    e.preventDefault();
+    toast("這個操作需要老師登入", 3000);
+    if(!isAdmin()) openAdminLogin();
+  }
+});
 
 init();
 renderAll();
